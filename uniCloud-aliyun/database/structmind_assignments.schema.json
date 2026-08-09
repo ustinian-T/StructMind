@@ -1,0 +1,80 @@
+{
+  "bsonType": "object",
+  "required": ["question_id", "chapter", "content", "rubric"],
+  "permission": {
+    "read": "auth.uid != null",
+    "create": "auth.role.includes('admin')",
+    "update": "auth.role.includes('admin')",
+    "delete": "auth.role.includes('admin')"
+  },
+  "properties": {
+    "_id": { "description": "记录ID" },
+    "question_id": {
+      "bsonType": "string",
+      "title": "题目编号",
+      "description": "唯一题目标识，如 ASGN_0001",
+      "pattern": "^[A-Z]+_\\d{4,}$"
+    },
+    "chapter": {
+      "bsonType": "string",
+      "title": "所属章节",
+      "description": "如：函数与极限、导数与微分、积分学等"
+    },
+    "difficulty": {
+      "bsonType": "int",
+      "title": "难度级别",
+      "enum": [1, 2, 3, 4, 5],
+      "defaultValue": 3
+    },
+    "content": {
+      "bsonType": "string",
+      "title": "题目内容",
+      "description": "作业题正文，支持数学公式（LaTeX格式）"
+    },
+    "answer": {
+      "bsonType": "string",
+      "title": "参考答案",
+      "description": "参考答案和解题过程"
+    },
+    "rubric": {
+      "bsonType": "string",
+      "title": "评分标准",
+      "description": "详细的评分标准和步骤分值"
+    },
+    "max_score": {
+      "bsonType": "int",
+      "title": "满分",
+      "minimum": 1,
+      "maximum": 100,
+      "defaultValue": 10
+    },
+    "explanation": {
+      "bsonType": "string",
+      "title": "解析",
+      "description": "详细解题思路和关键步骤说明"
+    },
+    "key_steps": {
+      "bsonType": "array",
+      "title": "关键步骤",
+      "description": "解题关键步骤列表",
+      "items": {
+        "bsonType": "string"
+      }
+    },
+    "tags": {
+      "bsonType": "array",
+      "title": "标签",
+      "items": {
+        "bsonType": "string"
+      }
+    },
+    "source": {
+      "bsonType": "string",
+      "title": "题目来源",
+      "enum": ["imported", "ai_generated", "manual"],
+      "defaultValue": "imported"
+    },
+    "created_at": { "bsonType": "timestamp" },
+    "updated_at": { "bsonType": "timestamp" }
+  }
+}

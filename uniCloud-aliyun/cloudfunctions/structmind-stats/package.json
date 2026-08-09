@@ -1,0 +1,9 @@
+{
+  "name": "structmind-stats",
+  "version": "1.0.0",
+  "description": "StructMind statistics and dashboard cloud function",
+  "main": "index.js",
+  "extensions": {
+    "uni-cloud-jql": {}
+  }
+}

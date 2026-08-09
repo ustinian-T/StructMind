@@ -1,0 +1,9 @@
+{
+  "name": "structmind-auth",
+  "description": "StructMind 用户认证云函数：注册、登录、审批",
+  "main": "index.js",
+  "dependencies": [],
+  "extensions": {
+    "uni-cloud-jql": {}
+  }
+}

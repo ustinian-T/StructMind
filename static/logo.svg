@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a5c52"/>
+      <stop offset="50%" stop-color="#2d8a7b"/>
+      <stop offset="100%" stop-color="#47b5a3"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#5ec9b8"/>
+      <stop offset="100%" stop-color="#8fd9cc"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background rounded square -->
+  <rect x="56" y="56" width="400" height="400" rx="96" fill="url(#bg)"/>
+  <rect x="56" y="56" width="400" height="400" rx="96" stroke="rgba(255,255,255,0.12)" stroke-width="3"/>
+
+  <!-- Binary tree structure — 7 nodes, clean design -->
+  <g transform="translate(256, 150)" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="2.5" stroke-linecap="round">
+    <!-- Level 0 to Level 1 -->
+    <line x1="0" y1="20" x2="-80" y2="90"/>
+    <line x1="0" y1="20" x2="80" y2="90"/>
+    <!-- Level 1 to Level 2 -->
+    <line x1="-80" y1="90" x2="-130" y2="170"/>
+    <line x1="-80" y1="90" x2="-40" y2="170"/>
+    <line x1="80" y1="90" x2="40" y2="170"/>
+    <line x1="80" y1="90" x2="130" y2="170"/>
+  </g>
+
+  <!-- Tree nodes — circles -->
+  <g fill="rgba(255,255,255,0.95)" stroke="rgba(255,255,255,0.3)" stroke-width="3">
+    <!-- Root -->
+    <circle cx="256" cy="170" r="22"/>
+    <!-- Level 1 -->
+    <circle cx="176" cy="240" r="18"/>
+    <circle cx="336" cy="240" r="18"/>
+    <!-- Level 2 leaves -->
+    <circle cx="126" cy="320" r="14"/>
+    <circle cx="216" cy="320" r="14"/>
+    <circle cx="296" cy="320" r="14"/>
+    <circle cx="386" cy="320" r="14"/>
+  </g>
+
+  <!-- Node value hints (Chinese structure characters) -->
+  <g fill="#1a5c52" font-family="'PingFang SC','Microsoft YaHei',sans-serif" font-weight="700" text-anchor="middle">
+    <text x="256" y="177" font-size="20">构</text>
+    <text x="176" y="247" font-size="15">数</text>
+    <text x="336" y="247" font-size="15">据</text>
+    <text x="126" y="326" font-size="11">算</text>
+    <text x="216" y="326" font-size="11">法</text>
+    <text x="296" y="326" font-size="11">思</text>
+    <text x="386" y="326" font-size="11">维</text>
+  </g>
+
+  <!-- Brand name -->
+  <text x="256" y="400" text-anchor="middle" fill="#fff" font-family="'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif" font-size="46" font-weight="700" letter-spacing="4">StructMind</text>
+  <text x="256" y="438" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-family="'PingFang SC','Microsoft YaHei',sans-serif" font-size="18" letter-spacing="8">数据结构 AI 智练</text>
+
+  <!-- Decorative dots -->
+  <circle cx="140" cy="130" r="3" fill="rgba(255,255,255,0.3)"/>
+  <circle cx="390" cy="110" r="2.5" fill="rgba(255,255,255,0.25)"/>
+  <circle cx="340" cy="150" r="2" fill="rgba(255,255,255,0.2)"/>
+  <circle cx="170" cy="100" r="2" fill="rgba(255,255,255,0.2)"/>
+</svg>

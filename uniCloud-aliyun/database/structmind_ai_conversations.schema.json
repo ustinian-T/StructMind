@@ -1,0 +1,78 @@
+{
+  "bsonType": "object",
+  "required": ["user_id", "type", "messages"],
+  "permission": {
+    "read": "doc.user_id === auth.uid || auth.role.includes('admin')",
+    "create": "auth.uid != null",
+    "update": "doc.user_id === auth.uid || auth.role.includes('admin')",
+    "delete": "auth.role.includes('admin')"
+  },
+  "properties": {
+    "_id": { "description": "对话ID" },
+    "user_id": {
+      "bsonType": "string",
+      "title": "用户ID",
+      "foreignKey": "structmind_users._id"
+    },
+    "type": {
+      "bsonType": "string",
+      "title": "对话类型",
+      "enum": ["tutor", "question_gen", "discussion_grade"],
+      "description": "tutor=辅导对话, question_gen=题目生成, discussion_grade=讨论评分"
+    },
+    "context": {
+      "bsonType": "object",
+      "title": "对话上下文",
+      "description": "关联的章节、题目、语言等信息",
+      "properties": {
+        "chapter": { "bsonType": "string" },
+        "topic": { "bsonType": "string" },
+        "question_id": { "bsonType": "string" },
+        "discussion_id": { "bsonType": "string" },
+        "record_id": { "bsonType": "string" },
+        "type": { "bsonType": "string" },
+        "difficulty": { "bsonType": "int" },
+        "language": { "bsonType": "string" }
+      }
+    },
+    "messages": {
+      "bsonType": "array",
+      "title": "消息列表",
+      "items": {
+        "bsonType": "object",
+        "required": ["role", "content"],
+        "properties": {
+          "role": {
+            "bsonType": "string",
+            "title": "角色",
+            "enum": ["system", "user", "assistant"]
+          },
+          "content": {
+            "bsonType": "string",
+            "title": "消息内容"
+          },
+          "timestamp": {
+            "bsonType": "timestamp",
+            "title": "消息时间"
+          }
+        }
+      }
+    },
+    "token_usage": {
+      "bsonType": "object",
+      "title": "Token用量",
+      "properties": {
+        "total_tokens": { "bsonType": "int" },
+        "prompt_tokens": { "bsonType": "int" },
+        "completion_tokens": { "bsonType": "int" }
+      }
+    },
+    "model": {
+      "bsonType": "string",
+      "title": "AI模型",
+      "description": "使用的AI模型名称"
+    },
+    "created_at": { "bsonType": "timestamp" },
+    "updated_at": { "bsonType": "timestamp" }
+  }
+}

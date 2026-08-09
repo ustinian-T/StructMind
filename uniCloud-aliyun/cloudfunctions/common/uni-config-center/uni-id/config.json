@@ -1,0 +1,20 @@
+{
+  "tokenSecret": "<请替换为随机生成的64字符密钥>",
+  "tokenExpiresIn": 604800,
+  "tokenExpiresThreshold": 86400,
+  "passwordErrorLimit": 6,
+  "passwordErrorRetryTime": 3600,
+  "maxTokenLength": 10,
+  "h5": {
+    "tokenExpiresIn": 86400,
+    "tokenExpiresThreshold": 3600
+  },
+  "app-plus": {
+    "tokenExpiresIn": 2592000,
+    "tokenExpiresThreshold": 86400
+  },
+  "web": {
+    "tokenExpiresIn": 86400,
+    "tokenExpiresThreshold": 3600
+  }
+}

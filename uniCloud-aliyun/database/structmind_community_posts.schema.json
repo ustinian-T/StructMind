@@ -1,0 +1,112 @@
+{
+  "bsonType": "object",
+  "required": ["user_id", "title", "content"],
+  "permission": {
+    "read": "auth.uid != null",
+    "create": "auth.uid != null",
+    "update": "doc.user_id === auth.uid || auth.role.includes('admin')",
+    "delete": "doc.user_id === auth.uid || auth.role.includes('admin')"
+  },
+  "properties": {
+    "_id": { "description": "帖子ID" },
+    "user_id": {
+      "bsonType": "string",
+      "title": "用户ID",
+      "foreignKey": "structmind_users._id"
+    },
+    "user_name": {
+      "bsonType": "string",
+      "title": "用户名",
+      "description": "发帖时的用户名快照"
+    },
+    "title": {
+      "bsonType": "string",
+      "title": "标题",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "content": {
+      "bsonType": "string",
+      "title": "内容",
+      "minLength": 1,
+      "maxLength": 10000,
+      "description": "帖子正文，支持富文本"
+    },
+    "category": {
+      "bsonType": "string",
+      "title": "分类",
+      "enum": ["question", "discussion", "sharing", "feedback", "other"],
+      "defaultValue": "discussion"
+    },
+    "tags": {
+      "bsonType": "array",
+      "title": "标签",
+      "items": { "bsonType": "string" },
+      "maxItems": 10
+    },
+    "chapter": {
+      "bsonType": "string",
+      "title": "关联章节",
+      "description": "如果帖子与特定章节相关"
+    },
+    "question_id": {
+      "bsonType": "string",
+      "title": "关联题目ID",
+      "description": "如果帖子讨论特定题目"
+    },
+    "likes": {
+      "bsonType": "int",
+      "title": "点赞数",
+      "minimum": 0,
+      "defaultValue": 0
+    },
+    "views": {
+      "bsonType": "int",
+      "title": "浏览数",
+      "minimum": 0,
+      "defaultValue": 0
+    },
+    "comments": {
+      "bsonType": "array",
+      "title": "评论列表",
+      "items": {
+        "bsonType": "object",
+        "required": ["user_id", "user_name", "content"],
+        "properties": {
+          "user_id": {
+            "bsonType": "string",
+            "title": "评论用户ID"
+          },
+          "user_name": {
+            "bsonType": "string",
+            "title": "评论用户名"
+          },
+          "content": {
+            "bsonType": "string",
+            "title": "评论内容",
+            "maxLength": 2000
+          },
+          "created_at": { "bsonType": "timestamp" }
+        }
+      }
+    },
+    "is_pinned": {
+      "bsonType": "bool",
+      "title": "是否置顶",
+      "defaultValue": false
+    },
+    "is_featured": {
+      "bsonType": "bool",
+      "title": "是否精选",
+      "defaultValue": false
+    },
+    "status": {
+      "bsonType": "string",
+      "title": "状态",
+      "enum": ["published", "hidden", "deleted"],
+      "defaultValue": "published"
+    },
+    "created_at": { "bsonType": "timestamp" },
+    "updated_at": { "bsonType": "timestamp" }
+  }
+}

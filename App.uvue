@@ -1,0 +1,100 @@
+<script setup lang="uts">
+	// #ifdef APP-ANDROID || APP-HARMONY
+	let firstBackTime = 0
+	// #endif
+
+	const API_BASE = 'https://datastytest.tshai.top'
+
+	// 在 onLaunch 中初始化 globalData，确保 getApp() 可用
+	onLaunch(() => {
+		console.log('StructMind App Launch')
+
+		// 初始化 globalData
+		const g = getApp().globalData || {}
+		if (!g.apiBase) g.apiBase = API_BASE
+		if (!g.token) g.token = null
+		if (!g.user) g.user = null
+		getApp().globalData = g
+
+		// 恢复登录状态
+		const saved = uni.getStorageSync('auth')
+		if (saved) {
+			try {
+				const parsed = JSON.parse(saved as string)
+				if (parsed) {
+					g.token = parsed.token || null
+					g.user = parsed.user || null
+				}
+			} catch (e) {
+				console.log('No saved auth')
+			}
+		}
+	})
+
+	onAppShow(() => {
+		console.log('StructMind App Show')
+	})
+
+	onAppHide(() => {
+		console.log('StructMind App Hide')
+	})
+
+	// #ifdef APP-ANDROID || APP-HARMONY
+	onLastPageBackPress(() => {
+		if (firstBackTime == 0) {
+			uni.showToast({ title: '再按一次退出应用', position: 'bottom' })
+			firstBackTime = Date.now()
+			setTimeout(() => { firstBackTime = 0 }, 2000)
+		} else if (Date.now() - firstBackTime < 2000) {
+			firstBackTime = Date.now()
+			uni.exit()
+		}
+	})
+	onExit(() => { console.log('StructMind App Exit') })
+	// #endif
+</script>
+
+<template>
+	<view></view>
+</template>
+
+<style>
+	:root {
+		--sm-primary: #2d8a7b;
+		--sm-primary-light: #47b5a3;
+		--sm-primary-dark: #1a5c52;
+		--sm-bg: #f5f8f7;
+		--sm-surface: #ffffff;
+		--sm-text: #1a2b28;
+		--sm-muted: #6b8280;
+		--sm-border: #dce5e3;
+		--sm-success: #3cb878;
+		--sm-warning: #e89c35;
+		--sm-danger: #e04a3c;
+		--sm-radius: 16px;
+		--sm-shadow: 0 4px 24px rgba(45, 138, 123, 0.08);
+	}
+	.uni-row { flex-direction: row; }
+	.uni-column { flex-direction: column; }
+	.sm-btn {
+		display: flex; align-items: center; justify-content: center; gap: 8px;
+		padding: 14px 28px; border-radius: 12px; font-size: 16px; font-weight: 600;
+		border: none; cursor: pointer; transition: all 0.2s ease;
+	}
+	.sm-btn-primary {
+		background: linear-gradient(135deg, #2d8a7b, #47b5a3);
+		color: white; box-shadow: 0 4px 16px rgba(45, 138, 123, 0.3);
+	}
+	.sm-btn-primary:active { transform: scale(0.97); opacity: 0.9; }
+	.sm-btn-ghost { background: transparent; color: #2d8a7b; border: 1.5px solid #2d8a7b; }
+	.sm-input {
+		width: 100%; padding: 14px 16px; border: 1.5px solid #dce5e3;
+		border-radius: 12px; font-size: 16px; background: #f9fbfa;
+		transition: border-color 0.2s; box-sizing: border-box;
+	}
+	.sm-input:focus { border-color: #2d8a7b; outline: none; background: #fff; }
+	.sm-card {
+		background: white; border-radius: 16px; padding: 20px;
+		box-shadow: 0 4px 24px rgba(45, 138, 123, 0.08); border: 1px solid #edf2f0;
+	}
+</style>

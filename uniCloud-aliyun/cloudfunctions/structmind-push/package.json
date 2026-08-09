@@ -1,0 +1,9 @@
+{
+  "name": "structmind-push",
+  "version": "1.0.0",
+  "description": "StructMind push notification cloud function",
+  "main": "index.js",
+  "extensions": {
+    "uni-cloud-jql": {}
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "structmind-ai",
+  "version": "1.0.0",
+  "description": "StructMind AI cloud function - question generation, tutoring, grading",
+  "main": "index.js",
+  "extensions": {
+    "uni-cloud-jql": {}
+  }
+}

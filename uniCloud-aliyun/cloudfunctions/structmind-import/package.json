@@ -1,0 +1,9 @@
+{
+  "name": "structmind-import",
+  "version": "1.0.0",
+  "description": "StructMind question data import cloud function",
+  "main": "index.js",
+  "extensions": {
+    "uni-cloud-jql": {}
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "structmind-admin",
+  "description": "StructMind 管理云函数：用户审批、用户列表",
+  "main": "index.js",
+  "dependencies": [],
+  "extensions": {
+    "uni-cloud-jql": {}
+  }
+}

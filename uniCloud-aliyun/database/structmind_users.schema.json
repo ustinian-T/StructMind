@@ -1,0 +1,53 @@
+{
+  "bsonType": "object",
+  "required": ["account", "password_hash", "name", "role", "status"],
+  "permission": {
+    "read": "auth.uid != null",
+    "create": false,
+    "update": "doc._id === auth.uid || auth.role.includes('admin')",
+    "delete": "auth.role.includes('admin')"
+  },
+  "properties": {
+    "_id": { "description": "用户ID" },
+    "account": {
+      "bsonType": "string",
+      "title": "账号",
+      "description": "登录账号，2-32字符",
+      "minLength": 2,
+      "maxLength": 32,
+      "pattern": "^[a-zA-Z0-9_@.\\-]+$"
+    },
+    "password_hash": {
+      "bsonType": "string",
+      "title": "密码哈希",
+      "description": "PBKDF2-SHA256 密码哈希，格式: salt$hash"
+    },
+    "name": {
+      "bsonType": "string",
+      "title": "姓名",
+      "minLength": 1,
+      "maxLength": 50
+    },
+    "phone": {
+      "bsonType": "string",
+      "title": "手机号",
+      "pattern": "^\\d{11}$"
+    },
+    "role": {
+      "bsonType": "string",
+      "title": "角色",
+      "enum": ["admin", "student"],
+      "defaultValue": "student"
+    },
+    "status": {
+      "bsonType": "string",
+      "title": "账号状态",
+      "enum": ["pending", "approved", "rejected", "banned"],
+      "defaultValue": "pending"
+    },
+    "created_at": { "bsonType": "timestamp" },
+    "updated_at": { "bsonType": "timestamp" },
+    "last_login_at": { "bsonType": "timestamp" },
+    "last_login_ip": { "bsonType": "string" }
+  }
+}

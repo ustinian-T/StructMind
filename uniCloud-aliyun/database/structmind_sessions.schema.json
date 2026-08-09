@@ -1,0 +1,23 @@
+{
+  "bsonType": "object",
+  "required": ["token", "user_id"],
+  "permission": {
+    "read": false,
+    "create": false,
+    "update": false,
+    "delete": "auth.role.includes('admin')"
+  },
+  "properties": {
+    "_id": { "description": "记录ID" },
+    "token": {
+      "bsonType": "string",
+      "title": "会话令牌"
+    },
+    "user_id": {
+      "bsonType": "string",
+      "title": "用户ID",
+      "foreignKey": "structmind_users._id"
+    },
+    "created_at": { "bsonType": "timestamp" }
+  }
+}

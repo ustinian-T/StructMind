@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+runtime/
+unpackage/
+.idea/
+*.sqlite3
+*.sqlite3-e
+node_modules/
+dist/
+.env

@@ -1,0 +1,27 @@
+{
+  "bsonType": "object",
+  "required": ["user_id"],
+  "permission": {
+    "read": "doc.user_id === auth.uid || auth.role.includes('admin')",
+    "create": "auth.uid != null",
+    "update": "doc.user_id === auth.uid || auth.role.includes('admin')",
+    "delete": "auth.role.includes('admin')"
+  },
+  "properties": {
+    "_id": { "description": "记录ID" },
+    "user_id": {
+      "bsonType": "string",
+      "title": "用户ID",
+      "foreignKey": "structmind_users._id"
+    },
+    "chapter_accuracy_json": { "bsonType": "string", "defaultValue": "{}" },
+    "type_accuracy_json": { "bsonType": "string", "defaultValue": "{}" },
+    "weak_concepts_json": { "bsonType": "string", "defaultValue": "[]" },
+    "strong_concepts_json": { "bsonType": "string", "defaultValue": "[]" },
+    "total_attempts": { "bsonType": "int", "defaultValue": 0 },
+    "total_correct": { "bsonType": "int", "defaultValue": 0 },
+    "practice_streak": { "bsonType": "int", "defaultValue": 0 },
+    "last_practice_at": { "bsonType": "timestamp" },
+    "updated_at": { "bsonType": "timestamp" }
+  }
+}
