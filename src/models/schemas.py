@@ -243,7 +243,26 @@ class BankGetRequest(BaseModel):
 
 
 class GeneratePlanRequest(BaseModel):
-    pass  # 无额外参数
+    exam_date: str
+    daily_minutes: int = Field(ge=10, le=480)
+    timezone: str = "Asia/Shanghai"
+    evaluated_at: str | None = None
+
+
+class LearningNoteCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    user_content: str = Field(default="", max_length=50_000)
+    tags: list[str] = Field(default_factory=list)
+    concept: str | None = Field(default=None, max_length=128)
+
+
+class LearningNoteUpdateRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    user_content: str | None = Field(default=None, max_length=50_000)
+    tags: list[str] | None = None
+    concept: str | None = Field(default=None, max_length=128)
+    is_pinned: bool | None = None
+    is_archived: bool | None = None
 
 
 class AISupplementRequest(BaseModel):

@@ -4,8 +4,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from src.models.schemas import RecommendRequest, GeneratePlanRequest, ReviewFeedbackRequest
+from src.models.schemas import (
+    RecommendRequest,
+    GeneratePlanRequest,
+    ReviewFeedbackRequest,
+    LearningNoteCreateRequest,
+    LearningNoteUpdateRequest,
+)
 from src.learning.service import LearningLoopService, utc_now
+from src.learning.rules import CONCEPT_KEYWORDS
 from src.services.recommendation import recommend_questions, generate_learning_plan_data
 from src.services.parser import supplements_payload
 from src.services.report import generate_learning_report_html
@@ -67,10 +74,76 @@ async def generate_plan(_req: GeneratePlanRequest, request: Request, _auth=Depen
     try:
         db = request.app.state.db
         exam_bank = request.app.state.exam_bank
-        plan_data = generate_learning_plan_data(exam_bank, db, _auth["user_id"])
+        plan_data = generate_learning_plan_data(
+            exam_bank, db, _auth["user_id"], exam_date=_req.exam_date,
+            daily_minutes=_req.daily_minutes, timezone=_req.timezone,
+            evaluated_at=_req.evaluated_at or utc_now(),
+        )
         db.create_learning_plan(_auth["user_id"], plan_data)
         plan = db.get_learning_plan(_auth["user_id"])
         return {"plan": plan}
+    except Exception as exc:
+        status, body = make_error_response(exc)
+        return request.app.state._json_response(body, status)
+
+
+@router.get("/learning/plans")
+async def plan_history(request: Request, _auth=Depends(require_auth)):
+    try:
+        return {"plans": request.app.state.db.get_learning_plan_history(_auth["user_id"])}
+    except Exception as exc:
+        status, body = make_error_response(exc)
+        return request.app.state._json_response(body, status)
+
+
+@router.post("/learning/conversations/{conversation_id}/summary")
+async def refresh_summary(conversation_id: int, request: Request, _auth=Depends(require_auth)):
+    try:
+        known = [name for name, _keywords in CONCEPT_KEYWORDS]
+        result = request.app.state.db.refresh_conversation_summary(
+            _auth["user_id"], conversation_id, known,
+        )
+        return {"summary": result}
+    except Exception as exc:
+        status, body = make_error_response(exc)
+        return request.app.state._json_response(body, status)
+
+
+@router.post("/learning/notes")
+async def create_note(req: LearningNoteCreateRequest, request: Request, _auth=Depends(require_auth)):
+    try:
+        note = request.app.state.db.create_learning_note(
+            _auth["user_id"], req.title.strip(), req.user_content, req.tags, req.concept,
+        )
+        return {"note": note}
+    except Exception as exc:
+        status, body = make_error_response(exc)
+        return request.app.state._json_response(body, status)
+
+
+@router.get("/learning/notes")
+async def list_notes(
+    request: Request, archived: bool = False, source_type: str | None = None,
+    concept: str | None = None, _auth=Depends(require_auth),
+):
+    try:
+        return {"notes": request.app.state.db.list_learning_notes(
+            _auth["user_id"], archived=archived, source_type=source_type, concept=concept,
+        )}
+    except Exception as exc:
+        status, body = make_error_response(exc)
+        return request.app.state._json_response(body, status)
+
+
+@router.patch("/learning/notes/{note_id}")
+async def update_note(
+    note_id: str, req: LearningNoteUpdateRequest, request: Request, _auth=Depends(require_auth),
+):
+    try:
+        note = request.app.state.db.update_learning_note(
+            _auth["user_id"], note_id, req.model_dump(exclude_unset=True),
+        )
+        return {"note": note}
     except Exception as exc:
         status, body = make_error_response(exc)
         return request.app.state._json_response(body, status)

@@ -46,6 +46,7 @@ from src.routes.deps import (
     require_agent_service,
     make_error_response,
 )
+from src.learning.rules import CONCEPT_KEYWORDS
 
 router = APIRouter(tags=["ai"])
 websocket_router = APIRouter(tags=["ai"])
@@ -148,6 +149,10 @@ async def _stream_local_turn(
                     "multi_agent" if context.mode == "multi_agent" else "tutor",
                     updated,
                 )
+            db.refresh_conversation_summary(
+                int(context.user_id), conversation_id,
+                [name for name, _keywords in CONCEPT_KEYWORDS],
+            )
             event = event.model_copy(update={"conversation_id": conversation_id})
         yield event
 

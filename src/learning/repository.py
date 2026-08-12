@@ -216,6 +216,36 @@ class LearningRepository:
                    WHERE id = ? AND status = 'pending'""",
                 (recommendation_id, _json(response), event_id),
             )
+            if not draft.get("is_correct"):
+                primary = (outcome.get("mastery_changes") or [{}])[0]
+                note_id = str(uuid.uuid4())
+                auto_content = {
+                    "learning_event_id": event_id,
+                    "question_id": draft["question_id"],
+                    "concepts": [item["concept"] for item in outcome.get("mastery_changes") or []],
+                    "mastery_changes": [
+                        {key: item.get(key) for key in ("concept", "role", "weight", "before_score", "after_score", "delta")}
+                        for item in outcome.get("mastery_changes") or []
+                    ],
+                    "error_reason": error_reason,
+                    "correct_answer": draft.get("correct_answer"),
+                    "next_review_at": review_updates[0]["next_review_at"] if review_updates else None,
+                    "rule_version": draft["rule_version"],
+                }
+                connection.execute(
+                    """INSERT INTO learning_notes
+                       (id, user_id, title, auto_content_json, user_content, tags_json,
+                        source_type, source_id, concept, error_category,
+                        is_pinned, is_archived, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, '', ?, 'answer', ?, ?, ?, 0, 0, ?, ?)""",
+                    (
+                        note_id, user_id,
+                        f"错题笔记：{primary.get('concept') or draft.get('chapter') or '待复习知识点'}",
+                        _json(auto_content),
+                        _json(["错题", primary.get("concept")] if primary.get("concept") else ["错题"]),
+                        event_id, primary.get("concept"), error_reason.get("category"), created_at, created_at,
+                    ),
+                )
             return response
 
     def get_learning_event(self, user_id: int, event_id: str) -> dict[str, Any]:

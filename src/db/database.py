@@ -14,6 +14,7 @@ import sqlite3
 import time
 import unicodedata
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,10 @@ from src.config import (
     DS_CONCEPTS,
 )
 from src.models.questions import ObjectiveQuestion, AssignmentQuestion
+
+
+def _utc_iso_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 # ═══════════════════════════════════════════════════════════════
 # 工具函数（内联避免循环依赖）
@@ -420,6 +425,11 @@ class PracticeDatabase:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
                     plan_data_json TEXT NOT NULL DEFAULT '{}',
+                    version INTEGER NOT NULL DEFAULT 1,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    exam_date TEXT,
+                    daily_minutes INTEGER,
+                    timezone TEXT,
                     created_at REAL NOT NULL,
                     updated_at REAL,
                     FOREIGN KEY (user_id) REFERENCES users(id)
@@ -607,6 +617,18 @@ class PracticeDatabase:
                 }
                 if column not in existing_columns:
                     db.execute(f"ALTER TABLE concept_mastery ADD COLUMN {column} {definition}")
+            plan_columns = {
+                row[1] for row in db.execute("PRAGMA table_info(learning_plans)").fetchall()
+            }
+            for column, definition in (
+                ("version", "INTEGER NOT NULL DEFAULT 1"),
+                ("status", "TEXT NOT NULL DEFAULT 'active'"),
+                ("exam_date", "TEXT"),
+                ("daily_minutes", "INTEGER"),
+                ("timezone", "TEXT"),
+            ):
+                if column not in plan_columns:
+                    db.execute(f"ALTER TABLE learning_plans ADD COLUMN {column} {definition}")
             legacy_ai_questions = db.execute(
                 "SELECT id, stem FROM ai_questions WHERE stem_hash IS NULL OR stem_hash = ''"
             ).fetchall()
@@ -1290,18 +1312,30 @@ class PracticeDatabase:
     def create_learning_plan(self, user_id: int, plan_data: dict[str, Any]) -> int:
         now = time.time()
         with self.connect() as db:
-            db.execute("DELETE FROM learning_plans WHERE user_id = ?", (user_id,))
+            current = db.execute(
+                "SELECT COALESCE(MAX(version), 0) AS version FROM learning_plans WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            version = int(current["version"] or 0) + 1
+            db.execute(
+                "UPDATE learning_plans SET status = 'superseded', updated_at = ? WHERE user_id = ? AND status != 'superseded'",
+                (now, user_id),
+            )
             cursor = db.execute(
-                """INSERT INTO learning_plans (user_id, plan_data_json, created_at, updated_at)
-                   VALUES (?, ?, ?, ?)""",
-                (user_id, json.dumps(plan_data, ensure_ascii=False), now, now),
+                """INSERT INTO learning_plans
+                   (user_id, plan_data_json, version, status, exam_date, daily_minutes,
+                    timezone, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (user_id, json.dumps(plan_data, ensure_ascii=False), version,
+                 plan_data.get("status", "active"), plan_data.get("exam_date"),
+                 plan_data.get("daily_minutes"), plan_data.get("timezone"), now, now),
             )
             return cursor.lastrowid
 
     def get_learning_plan(self, user_id: int) -> dict[str, Any] | None:
         with self.connect() as db:
             row = db.execute(
-                "SELECT * FROM learning_plans WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1",
+                "SELECT * FROM learning_plans WHERE user_id = ? AND status != 'superseded' ORDER BY version DESC LIMIT 1",
                 (user_id,),
             ).fetchone()
             if not row:
@@ -1323,9 +1357,132 @@ class PracticeDatabase:
                 day["progress"] = round(completed / total_target, 3) if total_target > 0 else 0
             return {
                 "id": row["id"], "user_id": row["user_id"],
+                "version": row["version"], "status": row["status"],
+                "exam_date": row["exam_date"], "daily_minutes": row["daily_minutes"],
+                "timezone": row["timezone"],
                 "plan_data": plan_data,
                 "created_at": row["created_at"], "updated_at": row["updated_at"],
             }
+
+    def get_learning_plan_history(self, user_id: int) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT * FROM learning_plans WHERE user_id = ? ORDER BY version DESC",
+                (user_id,),
+            ).fetchall()
+        return [{
+            "id": row["id"], "user_id": row["user_id"], "version": row["version"],
+            "status": row["status"], "exam_date": row["exam_date"],
+            "daily_minutes": row["daily_minutes"], "timezone": row["timezone"],
+            "plan_data": json.loads(row["plan_data_json"]),
+            "created_at": row["created_at"], "updated_at": row["updated_at"],
+        } for row in rows]
+
+    def refresh_conversation_summary(
+        self, user_id: int, conversation_id: int, known_concepts: list[str],
+    ) -> dict[str, Any]:
+        from src.learning.contracts import RULE_VERSION
+        from src.learning.rules import summarize_conversation
+
+        conversation = self.get_conversation(conversation_id, user_id)
+        if not conversation:
+            raise KeyError("对话不存在。")
+        messages = [
+            {**message, "id": message.get("id") or f"{conversation_id}:{index + 1}"}
+            for index, message in enumerate(conversation["messages"])
+        ]
+        summary = summarize_conversation(messages, known_concepts)
+        now = _utc_iso_now()
+        summary_id = str(uuid.uuid4())
+        encoded = json.dumps(summary, ensure_ascii=False)
+        with self.connect() as db:
+            existing = db.execute(
+                "SELECT id FROM conversation_summaries WHERE user_id = ? AND conversation_id = ?",
+                (user_id, conversation_id),
+            ).fetchone()
+            if existing:
+                summary_id = existing["id"]
+                db.execute(
+                    """UPDATE conversation_summaries SET summary_rule_json = ?, summary_final_json = ?,
+                       generation_method = 'rule', rule_version = ?, updated_at = ? WHERE id = ?""",
+                    (encoded, encoded, RULE_VERSION, now, summary_id),
+                )
+            else:
+                db.execute(
+                    """INSERT INTO conversation_summaries
+                       (id, user_id, conversation_id, summary_rule_json, summary_final_json,
+                        generation_method, rule_version, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, 'rule', ?, ?, ?)""",
+                    (summary_id, user_id, conversation_id, encoded, encoded, RULE_VERSION, now, now),
+                )
+        return {"id": summary_id, "conversation_id": conversation_id,
+                "summary_rule": summary, "summary_final": summary,
+                "generation_method": "rule", "rule_version": RULE_VERSION}
+
+    def create_learning_note(
+        self, user_id: int, title: str, user_content: str = "", tags: list[str] | None = None,
+        concept: str | None = None,
+    ) -> dict[str, Any]:
+        note_id = str(uuid.uuid4())
+        now = _utc_iso_now()
+        with self.connect() as db:
+            db.execute(
+                """INSERT INTO learning_notes
+                   (id, user_id, title, user_content, tags_json, source_type, concept, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, 'manual', ?, ?, ?)""",
+                (note_id, user_id, title, user_content, json.dumps(tags or [], ensure_ascii=False), concept, now, now),
+            )
+        return self.get_learning_note(user_id, note_id)
+
+    def get_learning_note(self, user_id: int, note_id: str) -> dict[str, Any]:
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT * FROM learning_notes WHERE id = ? AND user_id = ?", (note_id, user_id),
+            ).fetchone()
+        if not row:
+            raise KeyError("学习笔记不存在。")
+        item = dict(row)
+        item["auto_content"] = json.loads(item.pop("auto_content_json") or "null")
+        item["tags"] = json.loads(item.pop("tags_json") or "[]")
+        item["is_pinned"] = bool(item["is_pinned"])
+        item["is_archived"] = bool(item["is_archived"])
+        return item
+
+    def list_learning_notes(
+        self, user_id: int, *, archived: bool = False, source_type: str | None = None,
+        concept: str | None = None,
+    ) -> list[dict[str, Any]]:
+        conditions = ["user_id = ?", "is_archived = ?"]
+        params: list[Any] = [user_id, 1 if archived else 0]
+        if source_type:
+            conditions.append("source_type = ?")
+            params.append(source_type)
+        if concept:
+            conditions.append("concept = ?")
+            params.append(concept)
+        with self.connect() as db:
+            rows = db.execute(
+                f"SELECT id FROM learning_notes WHERE {' AND '.join(conditions)} ORDER BY is_pinned DESC, updated_at DESC",
+                params,
+            ).fetchall()
+        return [self.get_learning_note(user_id, row["id"]) for row in rows]
+
+    def update_learning_note(self, user_id: int, note_id: str, changes: dict[str, Any]) -> dict[str, Any]:
+        self.get_learning_note(user_id, note_id)
+        allowed = {"title", "user_content", "concept", "is_pinned", "is_archived"}
+        values = {key: value for key, value in changes.items() if key in allowed and value is not None}
+        if changes.get("tags") is not None:
+            values["tags_json"] = json.dumps(changes["tags"], ensure_ascii=False)
+        if not values:
+            return self.get_learning_note(user_id, note_id)
+        values["updated_at"] = _utc_iso_now()
+        assignments = ", ".join(f"{key} = ?" for key in values)
+        with self.connect() as db:
+            db.execute(
+                f"UPDATE learning_notes SET {assignments} WHERE id = ? AND user_id = ?",
+                [*values.values(), note_id, user_id],
+            )
+        return self.get_learning_note(user_id, note_id)
 
     # ── 社区 ──
 

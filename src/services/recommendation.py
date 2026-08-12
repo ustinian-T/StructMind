@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime, timezone as utc_timezone
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from src.db.database import public_bank_question
 from src.learning.rules import score_recommendations
@@ -46,55 +48,29 @@ def recommend_questions(
     }
 
 
-def generate_learning_plan_data(bank, db, user_id: int) -> dict[str, Any]:
-    """根据用户画像生成7天学习计划"""
+def generate_learning_plan_data(
+    bank, db, user_id: int, *, exam_date: str, daily_minutes: int,
+    timezone: str, evaluated_at: str,
+) -> dict[str, Any]:
+    """根据考试日期、时间预算、到期复习和薄弱知识点生成计划。"""
+    from src.learning.rules import build_plan
+
+    try:
+        zone = ZoneInfo(timezone)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError("未知时区。") from exc
+    instant = datetime.fromisoformat(evaluated_at.replace("Z", "+00:00"))
+    if instant.tzinfo is None:
+        instant = instant.replace(tzinfo=utc_timezone.utc)
+    if date.fromisoformat(exam_date) < instant.astimezone(zone).date():
+        raise ValueError("考试日期不能早于今天。")
+
     profile = db.get_user_profile(user_id) or {}
-    weak_concepts = profile.get("weak_concepts", [])
-    type_accuracy = profile.get("type_accuracy", {})
-    weak_types = [t for t, acc in type_accuracy.items() if acc < 0.5]
-
-    daily_targets = {
-        "单选题": 10, "多选题": 5, "填空题": 5, "判断题": 5,
-    }
-
-    recommendations_by_chapter: dict[str, list[str]] = {}
-    for ch, acc in (profile.get("chapter_accuracy", {}) or {}).items():
-        if acc < 0.5:
-            recommendations_by_chapter[ch] = ["重点复习该章节基础概念", "完成该章节练习并查看解析"]
-        elif acc < 0.7:
-            recommendations_by_chapter[ch] = ["巩固该章节中等难度题目", "回顾错题中的知识点"]
-        else:
-            recommendations_by_chapter[ch] = ["保持练习，尝试变体题目"]
-
-    plan_days = []
-    for day in range(7):
-        day_targets = [
-            {"qtype": qtype, "target_count": count, "source": "exam", "completed": 0}
-            for qtype, count in daily_targets.items()
-        ]
-        focus_chapter = (
-            weak_concepts[day % len(weak_concepts)]
-            if weak_concepts
-            else (bank.questions[0].chapter if bank.questions else "未分章")
-        )
-        plan_days.append({
-            "day_index": day,
-            "day_label": f"第{day + 1}天",
-            "focus_chapter": focus_chapter,
-            "focus_types": weak_types[:2] if weak_types else ["单选题", "填空题"],
-            "targets": day_targets,
-            "recommendations": recommendations_by_chapter.get(
-                focus_chapter, ["完成每日练习目标", "回顾当日错题"]
-            ),
-            "progress": 0,
-        })
-
-    return {
-        "days": plan_days,
-        "total_days": 7,
-        "profile_summary": {
-            "weak_concepts": weak_concepts,
-            "weak_types": weak_types,
-            "overall_accuracy": profile.get("accuracy", 0),
-        },
-    }
+    mastery = db.get_concept_mastery(user_id)
+    weak = [{"concept": item["concept"], "mastery_score": item["mastery_score"],
+             "estimated_minutes": 10} for item in mastery if item["mastery_score"] < 0.7]
+    for concept in profile.get("weak_concepts", []):
+        if concept not in {item["concept"] for item in weak}:
+            weak.append({"concept": concept, "mastery_score": 0.5, "estimated_minutes": 10})
+    due = [{**item, "estimated_minutes": 5} for item in db.get_due_reviews(user_id, evaluated_at)]
+    return build_plan(exam_date, daily_minutes, timezone, evaluated_at, due, weak)
