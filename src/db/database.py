@@ -458,6 +458,126 @@ class PracticeDatabase:
                     updated_at REAL,
                     UNIQUE(user_id, concept)
                 );
+                CREATE TABLE IF NOT EXISTS learning_events (
+                    id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    question_id INTEGER NOT NULL,
+                    bank_id TEXT NOT NULL,
+                    session_id TEXT,
+                    attempt_token TEXT NOT NULL,
+                    answer_json TEXT NOT NULL,
+                    normalized_answer TEXT NOT NULL,
+                    correct_answer TEXT NOT NULL,
+                    is_correct INTEGER NOT NULL,
+                    qtype TEXT NOT NULL,
+                    chapter TEXT NOT NULL,
+                    time_spent_seconds REAL DEFAULT 0,
+                    concept_weights_json TEXT NOT NULL,
+                    error_reason_rule_json TEXT NOT NULL,
+                    error_reason_ai_json TEXT,
+                    error_reason_final_json TEXT NOT NULL,
+                    recommendation_snapshot_id TEXT,
+                    rule_version TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    response_json TEXT,
+                    created_at TEXT NOT NULL
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS ux_learning_events_user_attempt_token
+                    ON learning_events(user_id, attempt_token);
+                CREATE INDEX IF NOT EXISTS ix_learning_events_user_created
+                    ON learning_events(user_id, created_at DESC);
+                CREATE TABLE IF NOT EXISTS question_concepts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    question_id INTEGER NOT NULL,
+                    bank_id TEXT NOT NULL,
+                    concept TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    weight REAL NOT NULL,
+                    source TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    mapping_version TEXT NOT NULL,
+                    UNIQUE(question_id, bank_id, concept)
+                );
+                CREATE TABLE IF NOT EXISTS mastery_changes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    learning_event_id TEXT NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    concept TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    weight REAL NOT NULL,
+                    before_score REAL NOT NULL,
+                    after_score REAL NOT NULL,
+                    delta REAL NOT NULL,
+                    before_stability REAL NOT NULL,
+                    after_stability REAL NOT NULL,
+                    before_difficulty REAL NOT NULL,
+                    after_difficulty REAL NOT NULL,
+                    evidence_json TEXT NOT NULL,
+                    next_review_at TEXT NOT NULL,
+                    rule_version TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS ix_mastery_changes_event
+                    ON mastery_changes(learning_event_id);
+                CREATE TABLE IF NOT EXISTS review_feedback (
+                    id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    concept TEXT NOT NULL,
+                    learning_event_id TEXT,
+                    feedback TEXT NOT NULL,
+                    reviewed_at TEXT NOT NULL,
+                    next_review_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS ix_review_feedback_user_concept
+                    ON review_feedback(user_id, concept, created_at DESC);
+                CREATE TABLE IF NOT EXISTS recommendation_snapshots (
+                    id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    learning_event_id TEXT NOT NULL,
+                    selected_question_id INTEGER NOT NULL,
+                    bank_id TEXT NOT NULL,
+                    recommendation_type TEXT NOT NULL,
+                    score_breakdown_json TEXT NOT NULL,
+                    evidence_refs_json TEXT NOT NULL,
+                    student_explanation TEXT NOT NULL,
+                    total_score REAL NOT NULL,
+                    rule_version TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS ix_recommendation_snapshots_user_created
+                    ON recommendation_snapshots(user_id, created_at DESC);
+                CREATE TABLE IF NOT EXISTS conversation_summaries (
+                    id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    conversation_id INTEGER NOT NULL,
+                    summary_rule_json TEXT NOT NULL,
+                    summary_ai_json TEXT,
+                    summary_final_json TEXT NOT NULL,
+                    generation_method TEXT NOT NULL,
+                    rule_version TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(user_id, conversation_id)
+                );
+                CREATE TABLE IF NOT EXISTS learning_notes (
+                    id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    title TEXT NOT NULL,
+                    auto_content_json TEXT,
+                    user_content TEXT NOT NULL DEFAULT '',
+                    tags_json TEXT NOT NULL DEFAULT '[]',
+                    source_type TEXT NOT NULL,
+                    source_id TEXT,
+                    concept TEXT,
+                    error_category TEXT,
+                    is_pinned INTEGER NOT NULL DEFAULT 0,
+                    is_archived INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS ix_learning_notes_user_updated
+                    ON learning_notes(user_id, is_archived, updated_at DESC);
                 """
             )
             # 迁移：为旧表添加列
@@ -477,6 +597,16 @@ class PracticeDatabase:
                 db.execute("ALTER TABLE ai_questions ADD COLUMN stem_hash TEXT")
             except sqlite3.OperationalError:
                 pass
+            for column, definition in (
+                ("review_state", "TEXT DEFAULT 'new'"),
+                ("last_learning_event_id", "TEXT"),
+                ("rule_version", "TEXT DEFAULT 'learning-loop-v1'"),
+            ):
+                existing_columns = {
+                    row[1] for row in db.execute("PRAGMA table_info(concept_mastery)").fetchall()
+                }
+                if column not in existing_columns:
+                    db.execute(f"ALTER TABLE concept_mastery ADD COLUMN {column} {definition}")
             legacy_ai_questions = db.execute(
                 "SELECT id, stem FROM ai_questions WHERE stem_hash IS NULL OR stem_hash = ''"
             ).fetchall()
@@ -711,6 +841,32 @@ class PracticeDatabase:
             "mode": "spaced_practice",
             "due_concepts": due_concepts[:10],
         }
+
+    def commit_learning_event(self, draft: dict[str, Any], outcome: dict[str, Any]) -> dict[str, Any]:
+        from src.learning.repository import LearningRepository
+        return LearningRepository(self).commit_learning_event(draft, outcome)
+
+    def get_learning_event(self, user_id: int, event_id: str) -> dict[str, Any]:
+        from src.learning.repository import LearningRepository
+        return LearningRepository(self).get_learning_event(user_id, event_id)
+
+    def get_due_reviews(self, user_id: int, evaluated_at: str) -> list[dict[str, Any]]:
+        from src.learning.repository import LearningRepository
+        return LearningRepository(self).get_due_reviews(user_id, evaluated_at)
+
+    def save_review_feedback(
+        self,
+        user_id: int,
+        concept: str,
+        feedback: str,
+        learning_event_id: str | None,
+        reviewed_at: str,
+        next_review_at: str,
+    ) -> dict[str, Any]:
+        from src.learning.repository import LearningRepository
+        return LearningRepository(self).save_review_feedback(
+            user_id, concept, feedback, learning_event_id, reviewed_at, next_review_at,
+        )
 
     # ── 用户系统 ──
 
