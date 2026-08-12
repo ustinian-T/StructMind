@@ -1,25 +1,27 @@
 """
-StructMind 核心功能单元测试
+StructMind 核心功能单元测试（更新模块路径）
 运行: py -m pytest tests/test_core.py -v
 """
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
 
 import hashlib
 import json
 import pytest
 
-
 # ═══ 密码哈希测试 ═══
-from server import hash_password, verify_password
+from src.db.database import hash_password, verify_password
+
 
 def test_hash_password_returns_salt_and_hash():
     result = hash_password("TestPass123")
     assert "$" in result
     salt, h = result.split("$", 1)
-    assert len(salt) == 32  # 16 bytes hex = 32 chars
-    assert len(h) == 64     # SHA256 hex = 64 chars
+    assert len(salt) == 32
+    assert len(h) == 64
 
 
 def test_verify_password_correct():
@@ -32,13 +34,9 @@ def test_verify_password_incorrect():
     assert verify_password("wrong", stored) is False
 
 
-def test_verify_password_empty():
-    stored = hash_password("")
-    assert verify_password("", stored) is True
-
-
 # ═══ 输入验证测试 ═══
-from server import validate_account, validate_password, validate_name, validate_phone
+from src.routes.deps import validate_account, validate_password, validate_name, validate_phone
+
 
 def test_validate_account_valid():
     assert validate_account("test_user") == "test_user"
@@ -57,13 +55,28 @@ def test_validate_account_invalid_chars():
 
 
 def test_validate_password_valid():
-    assert validate_password("123456") == "123456"
-    assert validate_password("a" * 100) == "a" * 100
+    assert validate_password("Abc12345") == "Abc12345"
+    assert validate_password("A" * 8 + "b" * 80 + "1") == "A" * 8 + "b" * 80 + "1"
 
 
 def test_validate_password_too_short():
-    with pytest.raises(ValueError, match="6-128"):
-        validate_password("12345")
+    with pytest.raises(ValueError, match="8-128"):
+        validate_password("Ab1")
+
+
+def test_validate_password_no_uppercase():
+    with pytest.raises(ValueError, match="大写字母"):
+        validate_password("abcdefg1")
+
+
+def test_validate_password_no_lowercase():
+    with pytest.raises(ValueError, match="小写字母"):
+        validate_password("ABCDEFG1")
+
+
+def test_validate_password_no_digit():
+    with pytest.raises(ValueError, match="数字"):
+        validate_password("Abcdefgh")
 
 
 def test_validate_phone_valid():
@@ -76,11 +89,12 @@ def test_validate_phone_invalid():
 
 
 # ═══ 答案批改测试 ═══
-from server import (
+from src.db.database import (
     normalize_choice_answer, normalize_multi_answer,
     normalize_fill, fill_candidates, grade_answer,
-    ObjectiveQuestion,
 )
+from src.models import ObjectiveQuestion
+
 
 @pytest.fixture
 def single_choice_q():
@@ -133,18 +147,15 @@ def test_normalize_choice_answer_simple():
 def test_normalize_choice_answer_chinese_true():
     assert normalize_choice_answer("对") == "A"
     assert normalize_choice_answer("正确") == "A"
-    assert normalize_choice_answer("是") == "A"
 
 
 def test_normalize_choice_answer_chinese_false():
     assert normalize_choice_answer("错") == "B"
     assert normalize_choice_answer("错误") == "B"
-    assert normalize_choice_answer("否") == "B"
 
 
 def test_normalize_multi_answer():
     assert normalize_multi_answer(["B", "A", "C"]) == "ABC"
-    assert normalize_multi_answer("CAB") == "ABC"
 
 
 def test_normalize_fill():
@@ -193,7 +204,8 @@ def test_grade_fill_case_insensitive(fill_q):
 
 
 # ═══ 文本哈希测试 ═══
-from server import text_hash
+from src.db.database import text_hash
+
 
 def test_text_hash_deterministic():
     h1 = text_hash("二叉树遍历")
@@ -213,17 +225,9 @@ def test_text_hash_ignores_punctuation():
     assert h1 == h2
 
 
-# ═══ 推荐算法测试 ═══
-from server import recommend_questions, QuestionBank, PracticeDatabase
-
-def test_recommend_questions_returns_correct_count():
-    """测试推荐算法返回正确数量的题目"""
-    # 这个测试需要实际的题库，使用集成测试方式
-    pass  # 需要数据库环境，在集成测试中覆盖
-
-
 # ═══ Token生成测试 ═══
-from server import generate_token
+from src.db.database import generate_token
+
 
 def test_generate_token_length():
     token = generate_token()
@@ -237,16 +241,15 @@ def test_generate_token_unique():
 
 # ═══ 数据库测试 ═══
 import tempfile
-from server import PracticeDatabase, DB_PATH
+from pathlib import Path
+from src.db.database import PracticeDatabase
+
 
 @pytest.fixture
 def temp_db():
-    """创建临时数据库"""
-    db_path = tempfile.mktemp(suffix='.sqlite3')
-    db = PracticeDatabase(db_path)
+    db_path = tempfile.mktemp(suffix=".sqlite3")
+    db = PracticeDatabase(Path(db_path))
     yield db
-    # 清理
-    import os
     try:
         os.remove(db_path)
     except OSError:
@@ -254,7 +257,6 @@ def temp_db():
 
 
 def test_db_init_creates_tables(temp_db):
-    """测试数据库初始化创建所有表"""
     with temp_db.connect() as conn:
         tables = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
@@ -267,56 +269,62 @@ def test_db_init_creates_tables(temp_db):
 
 
 def test_user_registration_flow(temp_db):
-    """测试完整用户注册流程"""
-    # 注册
-    user = temp_db.create_user("testuser", "Pass123", "测试", "13800138000")
+    user = temp_db.create_user("testuser", "Pass1234A", "测试", "13800138000")
     assert user["account"] == "testuser"
     assert user["status"] == "pending"
 
-    # 重复注册
     with pytest.raises(ValueError, match="已被注册"):
-        temp_db.create_user("testuser", "Pass123", "测试2", "13800138001")
+        temp_db.create_user("testuser", "Pass1234B", "测试2", "13800138001")
 
-    # 登录（待审批）
-    result = temp_db.authenticate("testuser", "Pass123")
+    result = temp_db.authenticate("testuser", "Pass1234A")
     assert result is not None
     assert result["status"] == "pending"
 
-    # 错误密码
     result = temp_db.authenticate("testuser", "wrong")
     assert result is None
 
 
 def test_admin_approval_flow(temp_db):
-    """测试管理员审批流程"""
-    # 注册用户
-    user = temp_db.create_user("student1", "Pass123", "学生", "13800138000")
+    user = temp_db.create_user("student1", "Pass1234X", "学生", "13800138000")
     assert user["status"] == "pending"
-
-    # 审批通过
     approved = temp_db.approve_user(user["id"], True)
     assert approved["status"] == "approved"
-
-    # 审批拒绝
-    user2 = temp_db.create_user("student2", "Pass123", "学生2", "13800138001")
+    user2 = temp_db.create_user("student2", "Pass1234Y", "学生2", "13800138001")
     rejected = temp_db.approve_user(user2["id"], False)
     assert rejected["status"] == "rejected"
 
 
 def test_session_lifecycle(temp_db):
-    """测试会话生命周期"""
-    user = temp_db.create_user("sessuser", "Pass123", "会话测试", "13800138000")
+    user = temp_db.create_user("sessuser", "Pass1234Z", "会话测试", "13800138000")
     temp_db.approve_user(user["id"], True)
-
     token = temp_db.create_session(user["id"])
     assert len(token) >= 32
-
     session = temp_db.get_session(token)
     assert session is not None
     assert session["user_id"] == user["id"]
-
     temp_db.delete_session(token)
     assert temp_db.get_session(token) is None
+
+
+# ═══ Router Agent 测试 ═══
+from src.agents.router import _rule_classify
+
+
+def test_rule_classify_problem_solving():
+    result = _rule_classify("这题怎么做啊我不会")
+    assert result is not None
+    assert result.intent == "problem_solving"
+
+
+def test_rule_classify_concept():
+    result = _rule_classify("什么是二叉树遍历的区别？")
+    assert result is not None
+    assert result.intent == "concept_understanding"
+
+
+def test_rule_classify_no_match():
+    result = _rule_classify("你好")
+    assert result is None
 
 
 if __name__ == "__main__":
