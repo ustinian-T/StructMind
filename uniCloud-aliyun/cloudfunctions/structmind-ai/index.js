@@ -19,6 +19,10 @@ const questionsCollection = db.collection('structmind_questions');
 const assignmentsCollection = db.collection('structmind_assignments');
 const discussionsCollection = db.collection('structmind_discussions');
 const conversationsCollection = db.collection('structmind_ai_conversations');
+const conversationSummariesCollection = db.collection('structmind_conversation_summaries');
+let learningRules;
+try { learningRules = require('structmind-learning-rules'); }
+catch (_error) { learningRules = require('../common/structmind-learning-rules'); }
 const SESSION_MAX_AGE_MS = Number(process.env.SM_SESSION_MAX_AGE_MS) || 7 * 24 * 60 * 60 * 1000;
 
 // ── AI API 配置 ──
@@ -194,6 +198,27 @@ async function appendToConversation(conversationId, messages) {
     messages: [...existing.messages, ...newMessages],
     updated_at: Date.now(),
   });
+}
+
+async function refreshRuleSummary(userId, conversationId) {
+  const result = await conversationsCollection.doc(conversationId).get();
+  const conversation = result.data[0];
+  if (!conversation || conversation.user_id !== userId) return null;
+  const messages = (conversation.messages || []).map((item, index) => ({
+    role: item.role, content: item.content, id: item.id || `${conversationId}:${index + 1}`,
+  }));
+  const summary = learningRules.summarizeConversation({ messages,
+    known_concepts: ['二叉树遍历', '图的遍历', '递归', '栈', '队列', '哈希', '排序'] });
+  const existing = (await conversationSummariesCollection.where({
+    user_id: userId, conversation_id: conversationId,
+  }).get()).data[0];
+  const now = Date.now();
+  const document = { summary_rule: summary, summary_final: summary,
+    generation_method: 'rule', rule_version: learningRules.RULE_VERSION, updated_at: now };
+  if (existing) await conversationSummariesCollection.doc(existing._id).update(document);
+  else await conversationSummariesCollection.add({ user_id: userId, conversation_id: conversationId,
+    ...document, created_at: now });
+  return summary;
 }
 
 // ── 主函数 ──
@@ -415,6 +440,7 @@ ${extra_requirements ? `额外要求：${extra_requirements}` : ''}
             mode,
           }, newMessages);
         }
+        await refreshRuleSummary(userId, conversation_id);
 
         return {
           code: 0,

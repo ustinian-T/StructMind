@@ -100,9 +100,54 @@ async function routeRequest(method, path, payload, token) {
   if (normalizedPath === '/answer' && method === 'POST') {
     const result = await callFunction('structmind-practice', 'submitAnswer', {
       token, session_id: payload.session_id, question_id: payload.question_id,
-      user_answer: payload.answer, time_spent: payload.time_spent || 0,
+      user_answer: payload.answer, time_spent: payload.time_spent_seconds || payload.time_spent || 0,
+      attempt_token: payload.attempt_token,
     });
     return ok(result.data || result);
+  }
+
+  const eventMatch = normalizedPath.match(/^\/learning\/events\/([^/]+)$/);
+  if (eventMatch && method === 'GET') {
+    const result = await callFunction('structmind-learning', 'getEvent', { token, event_id: eventMatch[1] });
+    return ok(result.data);
+  }
+  if (normalizedPath === '/learning/reviews' && method === 'GET') {
+    const result = await callFunction('structmind-learning', 'getReviews', { token, at: payload.at });
+    return ok(result.data);
+  }
+  if (normalizedPath === '/learning/reviews/feedback' && method === 'POST') {
+    const result = await callFunction('structmind-learning', 'reviewFeedback', { ...payload, token });
+    return ok(result.data);
+  }
+  if (normalizedPath === '/learning/generate-plan' && method === 'POST') {
+    const result = await callFunction('structmind-learning', 'savePlan', { ...payload, token });
+    return ok(result.data);
+  }
+  if ((normalizedPath === '/learning/plan' || normalizedPath === '/learning/plans') && method === 'GET') {
+    const result = await callFunction('structmind-learning', 'getPlan', { token });
+    return ok(normalizedPath.endsWith('/plans') ? { plans: result.data?.plans || [] } : { plan: result.data?.plan || null });
+  }
+  const summaryMatch = normalizedPath.match(/^\/learning\/conversations\/([^/]+)\/summary$/);
+  if (summaryMatch && method === 'POST') {
+    const result = await callFunction('structmind-learning', 'summarizeConversation', {
+      token, conversation_id: summaryMatch[1],
+    });
+    return ok(result.data);
+  }
+  if (normalizedPath === '/learning/notes' && method === 'GET') {
+    const result = await callFunction('structmind-learning', 'listNotes', { ...payload, token });
+    return ok(result.data);
+  }
+  if (normalizedPath === '/learning/notes' && method === 'POST') {
+    const result = await callFunction('structmind-learning', 'createNote', { ...payload, token });
+    return ok(result.data);
+  }
+  const noteMatch = normalizedPath.match(/^\/learning\/notes\/([^/]+)$/);
+  if (noteMatch && method === 'PATCH') {
+    const result = await callFunction('structmind-learning', 'updateNote', {
+      ...payload, token, note_id: noteMatch[1],
+    });
+    return ok(result.data);
   }
 
   // ── 错题 ──
@@ -203,10 +248,10 @@ async function routeRequest(method, path, payload, token) {
 
   // ── 推荐 ──
   if (normalizedPath === '/recommend/questions' && method === 'POST') {
-    const result = await callFunction('structmind-practice', 'createSession', {
-      token, mode: 'random', limit: payload.count || 15, include_wrong: true,
+    const result = await callFunction('structmind-learning', 'recommend', {
+      token, count: payload.count || 15, types: payload.types || [],
     });
-    return ok({ questions: result.data?.questions || [], count: result.data?.total || 0 });
+    return ok(result.data);
   }
 
   // ── AI 流式（非流式降级） ──
@@ -255,7 +300,7 @@ async function callFunction(name, action, params = {}) {
 const CORS_HEADERS = {
   'Content-Type': 'application/json',
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 

@@ -6,11 +6,18 @@ const NAMES = {
   changes: 'structmind_mastery_changes', recommendations: 'structmind_recommendation_snapshots',
 };
 
+function notFound(message = '学习事件不存在') {
+  const error = new Error(message);
+  error.code = 404;
+  return error;
+}
+
 function createLearningStore(db) {
   const events = db.collection(NAMES.events);
   const mastery = db.collection(NAMES.mastery);
   const changes = db.collection(NAMES.changes);
   const recommendations = db.collection(NAMES.recommendations);
+  const notes = db.collection('structmind_learning_notes');
 
   async function eventByToken(userId, attemptToken) {
     const result = await events.where({ user_id: userId, attempt_token: attemptToken }).get();
@@ -39,20 +46,49 @@ function createLearningStore(db) {
       else await mastery.add({ user_id: event.user_id, concept: change.concept, ...state, created_at: now });
     }
     const recommendation = outcome.next_recommendation || (outcome.response || {}).next_recommendation;
+    let recommendationSnapshotId = null;
     if (recommendation) {
       const found = await recommendations.where({ learning_event_id: event._id }).get();
-      if (!found.data.length) {
-        await recommendations.add({
+      if (found.data.length) recommendationSnapshotId = found.data[0]._id;
+      else {
+        const added = await recommendations.add({
           ...recommendation, user_id: event.user_id, learning_event_id: event._id,
           selected_question_id: String(recommendation.question_id), created_at: now, updated_at: now,
         });
+        recommendationSnapshotId = added.id;
       }
     }
     const response = {
       ...(outcome.response || {}), learning_event_id: event._id,
       mastery_changes: outcome.mastery_changes || (outcome.response || {}).mastery_changes || [],
+      recommendation_snapshot_id: recommendationSnapshotId,
       rule_version: event.draft.rule_version,
     };
+    if (response.next_recommendation && recommendationSnapshotId) {
+      response.next_recommendation = {
+        ...response.next_recommendation, recommendation_snapshot_id: recommendationSnapshotId,
+      };
+    }
+    if (response.is_correct === false) {
+      const found = await notes.where({ user_id: event.user_id, source_type: 'answer', source_id: event._id }).get();
+      if (!found.data.length) {
+        const primary = (response.mastery_changes || [])[0] || {};
+        await notes.add({
+          user_id: event.user_id, title: `错题笔记：${primary.concept || '待复习知识点'}`,
+          auto_content: {
+            learning_event_id: event._id, question_id: event.draft.question_id,
+            mastery_changes: response.mastery_changes, error_reason: response.error_reason,
+            correct_answer: response.correct_answer,
+            next_review_at: (response.review_updates || [])[0]?.next_review_at || null,
+            rule_version: event.draft.rule_version,
+          },
+          user_content: '', tags: ['错题', ...(primary.concept ? [primary.concept] : [])],
+          source_type: 'answer', source_id: event._id, concept: primary.concept || null,
+          error_category: response.error_reason?.category || null,
+          is_pinned: false, is_archived: false, created_at: now, updated_at: now,
+        });
+      }
+    }
     await events.doc(event._id).update({ status: 'committed', response, updated_at: now });
     return response;
   }
@@ -76,7 +112,7 @@ function createLearningStore(db) {
 
   async function recoverPendingEvent(userId, attemptToken) {
     const event = await eventByToken(userId, attemptToken);
-    if (!event) throw new Error('学习事件不存在');
+    if (!event) throw notFound();
     return finish(event);
   }
 
@@ -84,9 +120,14 @@ function createLearningStore(db) {
     const result = await events.doc(eventId).get();
     const event = result.data[0];
     if (!event || event.user_id !== userId || event.status !== 'committed') {
-      throw new Error('学习事件不存在');
+      throw notFound();
     }
     return event.response;
+  }
+
+  async function getLearningEventByToken(userId, attemptToken) {
+    const event = await eventByToken(userId, attemptToken);
+    return event && event.status === 'committed' ? event.response : null;
   }
 
   async function getDueReviews(userId, at = Date.now()) {
@@ -96,7 +137,7 @@ function createLearningStore(db) {
       .sort((a, b) => Date.parse(a.next_review_at) - Date.parse(b.next_review_at));
   }
 
-  return { commitLearningEvent, recoverPendingEvent, getLearningEvent, getDueReviews };
+  return { commitLearningEvent, recoverPendingEvent, getLearningEvent, getLearningEventByToken, getDueReviews };
 }
 
 module.exports = { createLearningStore };

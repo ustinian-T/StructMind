@@ -16,6 +16,16 @@ const practiceSessionsCollection = db.collection('structmind_practice_sessions')
 const practiceRecordsCollection = db.collection('structmind_practice_records');
 const userStatsCollection = db.collection('structmind_user_stats');
 const SESSION_MAX_AGE_MS = Number(process.env.SM_SESSION_MAX_AGE_MS) || 7 * 24 * 60 * 60 * 1000;
+let learningRules;
+let learningStoreFactory;
+try {
+  learningRules = require('structmind-learning-rules');
+  learningStoreFactory = require('structmind-learning-store');
+} catch (_error) {
+  learningRules = require('../common/structmind-learning-rules');
+  learningStoreFactory = require('../common/structmind-learning-store');
+}
+const learningStore = learningStoreFactory.createLearningStore(db);
 
 // ── 权限验证 ──
 async function requireAuth(token) {
@@ -258,10 +268,14 @@ exports.main = async (event, context) => {
           question_id,
           user_answer,
           time_spent = 0,  // 答题耗时(秒)
+          attempt_token,
         } = params;
 
         if (!session_id) throw { code: 400, message: '缺少会话ID' };
         if (!question_id) throw { code: 400, message: '缺少题目ID' };
+        if (!String(attempt_token || '').trim()) throw { code: 400, message: '缺少 attempt_token' };
+        const replay = await learningStore.getLearningEventByToken(userId, attempt_token);
+        if (replay) return { code: 0, message: replay.is_correct ? '回答正确！' : '回答错误', data: replay };
 
         // 获取题目信息
         const questionResult = await questionsCollection.doc(question_id).get();
@@ -287,6 +301,72 @@ exports.main = async (event, context) => {
 
         // 评分
         const gradeResult = gradeAnswer(question, user_answer);
+        const evaluatedAt = new Date(now).toISOString().replace('.000Z', 'Z');
+        const qtypeMap = {
+          single_choice: '单选题', multi_choice: '多选题', fill_blank: '填空题', true_false: '判断题',
+        };
+        const conceptWeights = learningRules.resolveConcepts({
+          stem: question.content || question.stem || question.title || '', chapter: question.chapter || '',
+          curatedConcepts: question.concepts || question.knowledge_points || [],
+        });
+        const masteryResult = await db.collection('structmind_concept_mastery').where({ user_id: userId }).get();
+        const states = new Map(masteryResult.data.map(item => [item.concept, item]));
+        const masteryChanges = conceptWeights.map(item => {
+          const current = states.get(item.concept) || {};
+          return {
+            ...learningRules.updateMastery({ ...item, current, is_correct: gradeResult.is_correct === true }),
+            review: learningRules.scheduleReview({
+              current, is_correct: gradeResult.is_correct === true, weight: item.weight, evaluated_at: evaluatedAt,
+            }),
+          };
+        });
+        const primaryState = states.get(conceptWeights[0]?.concept) || {};
+        const errorReason = learningRules.classifyError({
+          is_correct: gradeResult.is_correct === true, qtype: qtypeMap[question.type] || question.type,
+          user_answer, correct_answer: question.answer, time_spent_seconds: time_spent,
+          mastery_score: primaryState.mastery_score ?? 0.5,
+        });
+        const candidateResult = await questionsCollection.limit(200).get();
+        const candidates = candidateResult.data.filter(item => item._id !== question_id).map(item => {
+          const concepts = learningRules.resolveConcepts({
+            stem: item.content || item.stem || item.title || '', chapter: item.chapter || '',
+            curatedConcepts: item.concepts || item.knowledge_points || [],
+          });
+          const scores = concepts.map(entry => states.get(entry.concept)?.mastery_score).filter(Number.isFinite);
+          return { question_id: item._id, bank_id: 'exam', concepts: concepts.map(entry => entry.concept),
+            mastery_score: scores.length ? Math.min(...scores) : 0.5, due_days: 0,
+            recent_exposures: 0, evidence_refs: concepts.map(entry => `concept:${entry.concept}`) };
+        });
+        const recommendations = learningRules.scoreRecommendations({
+          candidates, context: {
+            recent_error_concepts: gradeResult.is_correct === true ? [] : conceptWeights.map(item => item.concept),
+            plan_concepts: [], exam_days_remaining: null,
+          }, limit: 1,
+        });
+        const reviewUpdates = masteryChanges.map(change => ({
+          concept: change.concept, role: change.role, next_review_at: change.review.next_review_at,
+          interval_days: change.review.interval_days, review_state: change.review.review_state,
+        }));
+        const learningResponse = await learningStore.commitLearningEvent({
+          userId, attemptToken: attempt_token,
+          draft: {
+            question_id, session_id, answer: user_answer, correct_answer: question.answer,
+            is_correct: gradeResult.is_correct === true, qtype: qtypeMap[question.type] || question.type,
+            chapter: question.chapter || '', time_spent_seconds: time_spent,
+            concept_weights: conceptWeights, evaluated_at: evaluatedAt,
+            rule_version: learningRules.RULE_VERSION,
+          },
+          outcome: {
+            mastery_changes: masteryChanges, next_recommendation: recommendations[0] || null,
+            response: {
+              is_correct: gradeResult.is_correct, score: gradeResult.score, max_score: gradeResult.max_score,
+              correct_answer: question.answer, explanation: question.explanation || '',
+              error_reason: errorReason, review_updates: reviewUpdates,
+              next_recommendation: recommendations[0] || null, plan_progress: { status: 'not_configured' },
+              enhancement_status: 'rule_only', rule_version: learningRules.RULE_VERSION,
+            },
+          },
+        });
 
         // 记录答题记录
         const recordData = {
@@ -362,11 +442,7 @@ exports.main = async (event, context) => {
           code: 0,
           message: isCorrect ? '回答正确！' : '回答错误',
           data: {
-            is_correct: gradeResult.is_correct,
-            score: gradeResult.score,
-            max_score: gradeResult.max_score,
-            correct_answer: question.answer,
-            explanation: question.explanation || '',
+            ...learningResponse,
             session_progress: {
               completed: updateData.completed,
               total: session.total,
