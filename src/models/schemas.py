@@ -130,6 +130,9 @@ class AnswerRequest(BaseModel):
     question_id: int
     bank_id: str | None = None
     answer: Any = None
+    attempt_token: str | None = Field(default=None, max_length=128)
+    session_id: str | None = Field(default=None, max_length=128)
+    time_spent_seconds: float = Field(default=0, ge=0, le=86_400)
 
 
 class AIGenerateRequest(BaseModel):
@@ -197,6 +200,12 @@ class RecommendRequest(BaseModel):
 class ConceptUpdateRequest(BaseModel):
     concept: str
     is_correct: bool = False
+
+
+class ReviewFeedbackRequest(BaseModel):
+    concept: str = Field(min_length=1, max_length=128)
+    feedback: Literal["too_easy", "just_right", "too_hard"]
+    learning_event_id: str | None = Field(default=None, max_length=128)
 
 
 class ConfigUpdateRequest(BaseModel):

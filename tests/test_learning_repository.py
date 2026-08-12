@@ -176,8 +176,12 @@ def test_commit_persists_complete_event_and_mastery(database, approved_users):
             "SELECT * FROM mastery_changes WHERE learning_event_id = ?",
             (result["learning_event_id"],),
         ).fetchall()
+        attempt_count = conn.execute(
+            "SELECT COUNT(*) FROM attempts WHERE user_id = ?", (owner["id"],)
+        ).fetchone()[0]
     assert len(mastery) == 2
     assert len(changes) == 2
+    assert attempt_count == 1
     assert {row["last_learning_event_id"] for row in mastery} == {result["learning_event_id"]}
 
 
@@ -195,6 +199,7 @@ def test_duplicate_attempt_token_replays_original_without_new_changes(database, 
     with database.connect() as conn:
         assert conn.execute("SELECT COUNT(*) FROM learning_events").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM mastery_changes").fetchone()[0] == 2
+        assert conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 1
 
 
 def test_recommendation_failure_rolls_back_event_and_mastery(database, approved_users):
@@ -213,6 +218,7 @@ def test_recommendation_failure_rolls_back_event_and_mastery(database, approved_
         assert conn.execute("SELECT COUNT(*) FROM learning_events").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM mastery_changes").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM concept_mastery").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 0
 
 
 def test_event_trace_is_scoped_to_owner(database, approved_users):

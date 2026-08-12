@@ -45,6 +45,23 @@ class LearningRepository:
             created_at = str(draft["evaluated_at"])
             error_reason = outcome["error_reason"]
             connection.execute(
+                """INSERT INTO attempts
+                   (question_id, source, qtype, user_answer, correct_answer,
+                    is_correct, created_at, user_id, chapter)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    int(draft["question_id"]),
+                    str(draft["bank_id"]),
+                    str(draft.get("qtype") or ""),
+                    _json(draft.get("answer")),
+                    str(draft.get("correct_answer") or ""),
+                    1 if draft.get("is_correct") else 0,
+                    _epoch(created_at),
+                    user_id,
+                    str(draft.get("chapter") or ""),
+                ),
+            )
+            connection.execute(
                 """INSERT INTO learning_events
                    (id, user_id, question_id, bank_id, session_id, attempt_token,
                     answer_json, normalized_answer, correct_answer, is_correct, qtype,

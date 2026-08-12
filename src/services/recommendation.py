@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import random
 from typing import Any
 
 from src.db.database import public_bank_question
+from src.learning.rules import score_recommendations
+from src.learning.service import recommendation_candidates
 
 
 def recommend_questions(
@@ -20,36 +21,23 @@ def recommend_questions(
     if not available:
         return {"questions": [], "reason": "没有符合条件的题目。"}
 
-    with db.connect() as conn:
-        recent_ids = {
-            row[0]
-            for row in conn.execute(
-                "SELECT question_id FROM attempts WHERE user_id = ? AND source != 'ai' ORDER BY created_at DESC LIMIT 200",
-                (user_id,),
-            ).fetchall()
-        }
-
     weak_concepts = set((profile or {}).get("weak_concepts", []))
     type_accuracy = (profile or {}).get("type_accuracy", {})
-
-    def question_score(q) -> float:
-        score = 0.0
-        if q.chapter in weak_concepts:
-            score += 3.0
-        if type_accuracy.get(q.qtype, 1.0) < 0.5:
-            score += 2.0
-        if q.id not in recent_ids:
-            score += 1.0
-        score += random.uniform(0, 0.5)
-        return score
-
-    sorted_questions = sorted(available, key=question_score, reverse=True)
-    selected = sorted_questions[:min(requested_count * 2, len(sorted_questions))]
-    random.shuffle(selected)
-    selected = selected[:requested_count]
+    allowed_ids = {int(question.id) for question in available}
+    candidates = [item for item in recommendation_candidates(bank, db, user_id)
+                  if int(item["question_id"]) in allowed_ids]
+    recommendations = score_recommendations(
+        candidates,
+        {"recent_error_concepts": list(weak_concepts), "plan_concepts": [],
+         "exam_days_remaining": None},
+        requested_count,
+    )
+    by_id = {int(question.id): question for question in available}
+    selected = [by_id[int(item["question_id"])] for item in recommendations]
 
     return {
         "questions": [public_bank_question(q) for q in selected],
+        "recommendations": recommendations,
         "count": len(selected),
         "profile_summary": {
             "weak_concepts": list(weak_concepts),

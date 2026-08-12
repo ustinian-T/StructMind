@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Request
 
 from src.models.schemas import SessionRequest, AnswerRequest, ConceptUpdateRequest
 from src.db.database import public_bank_question, grade_answer, extract_concepts_from_stem
+from src.learning.service import LearningLoopService
 from src.routes.deps import (
     get_db,
     get_exam_bank,
@@ -106,19 +107,26 @@ async def submit_answer(req: AnswerRequest, request: Request):
         session = parse_auth_header(request.headers.get("Authorization"), db=db)
         if session:
             user_id = session["user_id"]
-        chapter = getattr(question, "chapter", "") or ""
-        db.record_attempt(
-            question.id, bank.bank_id, question.qtype,
-            req.answer, question.answer, result["is_correct"],
-            user_id=user_id, chapter=chapter,
-        )
-        result["question"] = public_bank_question(question, include_answer=True)
         if user_id > 0:
-            try:
-                profile = db.update_user_profile(user_id)
-                result["profile"] = profile
-            except Exception:
-                pass
+            if not (req.attempt_token or "").strip():
+                raise ValueError("attempt_token 不能为空。")
+            result = LearningLoopService(db, bank).submit_answer(
+                user_id=user_id,
+                question=question,
+                answer=req.answer,
+                grading=result,
+                attempt_token=req.attempt_token,
+                session_id=req.session_id,
+                time_spent_seconds=req.time_spent_seconds,
+            )
+        else:
+            chapter = getattr(question, "chapter", "") or ""
+            db.record_attempt(
+                question.id, bank.bank_id, question.qtype,
+                req.answer, question.answer, result["is_correct"],
+                user_id=user_id, chapter=chapter,
+            )
+        result["question"] = public_bank_question(question, include_answer=True)
         return result
     except Exception as exc:
         status, body = make_error_response(exc)

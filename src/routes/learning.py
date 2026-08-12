@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from src.models.schemas import RecommendRequest, GeneratePlanRequest
+from src.models.schemas import RecommendRequest, GeneratePlanRequest, ReviewFeedbackRequest
+from src.learning.service import LearningLoopService, utc_now
 from src.services.recommendation import recommend_questions, generate_learning_plan_data
 from src.services.parser import supplements_payload
 from src.services.report import generate_learning_report_html
@@ -12,6 +13,40 @@ from src.db.database import public_discussion
 from src.routes.deps import require_auth, selected_bank, parse_auth_header, make_error_response
 
 router = APIRouter(tags=["learning"])
+
+
+@router.get("/learning/events/{event_id}")
+async def learning_event(event_id: str, request: Request, _auth=Depends(require_auth)):
+    try:
+        return {"event": request.app.state.db.get_learning_event(_auth["user_id"], event_id)}
+    except Exception as exc:
+        status, body = make_error_response(exc)
+        return request.app.state._json_response(body, status)
+
+
+@router.get("/learning/reviews")
+async def due_reviews(request: Request, at: str | None = None, _auth=Depends(require_auth)):
+    try:
+        evaluated_at = at or utc_now()
+        return {"reviews": request.app.state.db.get_due_reviews(_auth["user_id"], evaluated_at),
+                "evaluated_at": evaluated_at}
+    except Exception as exc:
+        status, body = make_error_response(exc)
+        return request.app.state._json_response(body, status)
+
+
+@router.post("/learning/reviews/feedback")
+async def review_feedback(req: ReviewFeedbackRequest, request: Request, _auth=Depends(require_auth)):
+    try:
+        service = LearningLoopService(request.app.state.db, request.app.state.exam_bank)
+        result = service.record_review_feedback(
+            user_id=_auth["user_id"], concept=req.concept.strip(), feedback=req.feedback,
+            learning_event_id=req.learning_event_id,
+        )
+        return {"review_feedback": result}
+    except Exception as exc:
+        status, body = make_error_response(exc)
+        return request.app.state._json_response(body, status)
 
 
 @router.post("/recommend/questions")
