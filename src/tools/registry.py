@@ -39,12 +39,7 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                 "description": "获取学生的学习画像，包括弱项章节、题型正确率、概念掌握度",
                 "parameters": {
                     "type": "object",
-                    "properties": {
-                        "user_id": {
-                            "type": "integer",
-                            "description": "学生用户ID，默认为当前对话的学生",
-                        }
-                    },
+                    "properties": {},
                     "required": [],
                 },
             },
@@ -144,7 +139,8 @@ class ToolRegistry:
         return {"success": False, "error": f"题目{qid}不存在"}
 
     def _tool_get_student_profile(self, args: dict) -> dict[str, Any]:
-        uid = int(args.get("user_id", self._user_id))
+        # 用户身份来自服务端创建 ToolRegistry 时的可信上下文，绝不采信模型参数。
+        uid = self._user_id
         profile = self._db.get_user_profile(uid) or self._db.update_user_profile(uid)
         concepts = self._db.get_concept_mastery(uid)
         return {"success": True, "data": {"profile": profile, "concept_mastery": concepts}}

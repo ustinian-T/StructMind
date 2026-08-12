@@ -8,7 +8,7 @@
       <view class="spacer"></view>
     </view>
 
-    <view class="register-card">
+    <form class="register-card" @submit="handleRegister">
       <text class="card-title">注册 StructMind</text>
       <text class="card-desc">填写信息创建你的专属学习账号</text>
 
@@ -40,7 +40,7 @@
         <text>{{ successMsg }}</text>
       </view>
 
-      <button class="register-btn" @tap="handleRegister" :disabled="loading || !account || !password || !name || !phone">
+      <button class="register-btn" form-type="submit" :disabled="loading || !account || !password || !name || !phone">
         <text v-if="!loading">注 册</text>
         <text v-else>注册中...</text>
       </button>
@@ -48,11 +48,12 @@
       <view class="notice-box">
         <text class="notice-text">📋 注册后需等待管理员审批通过方可登录使用</text>
       </view>
-    </view>
+    </form>
   </view>
 </template>
 
 <script>
+import { callCloud, getErrorMessage } from '@/utils/cloud.js'
 // getApp() 是 uni-app 全局函数，无需导入
 export default {
   data() {
@@ -83,19 +84,12 @@ export default {
       this.errorMsg = ''
       this.successMsg = ''
       try {
-        const app = getApp()
-        const apiBase = app.globalData.apiBase || 'https://datastytest.tshai.top'
-        const res = await uni.request({
-          url: apiBase + '/api/auth/register',
-          method: 'POST',
-          data: {
-            account: this.account.trim(),
-            password: this.password,
-            name: this.name.trim(),
-            phone: this.phone.trim(),
-          },
+        const data = await callCloud('structmind-auth', 'register', {
+          account: this.account.trim(),
+          password: this.password,
+          name: this.name.trim(),
+          phone: this.phone.trim(),
         })
-        const data = res.data
         if (data.id) {
           this.successMsg = '注册成功！请等待管理员审批后登录。'
           this.account = ''
@@ -107,8 +101,7 @@ export default {
           }, 2000)
         }
       } catch (err) {
-        const msg = err.data?.error || err.message || '注册失败，请重试'
-        this.errorMsg = msg
+        this.errorMsg = getErrorMessage(err, '注册失败，请重试')
       } finally {
         this.loading = false
       }

@@ -1,3 +1,4 @@
+// @ts-nocheck
 'use strict';
 
 /**
@@ -14,13 +15,19 @@ const discussionsCollection = db.collection('structmind_discussions');
 const practiceSessionsCollection = db.collection('structmind_practice_sessions');
 const practiceRecordsCollection = db.collection('structmind_practice_records');
 const userStatsCollection = db.collection('structmind_user_stats');
+const SESSION_MAX_AGE_MS = Number(process.env.SM_SESSION_MAX_AGE_MS) || 7 * 24 * 60 * 60 * 1000;
 
 // ── 权限验证 ──
 async function requireAuth(token) {
   if (!token) throw { code: 401, message: '请先登录' };
   const sessionResult = await sessionsCollection.where({ token }).get();
   if (sessionResult.data.length === 0) throw { code: 401, message: '登录已过期' };
-  const userResult = await usersCollection.doc(sessionResult.data[0].user_id).get();
+  const session = sessionResult.data[0];
+  if ((session.expires_at || session.created_at + SESSION_MAX_AGE_MS) <= Date.now()) {
+    await sessionsCollection.where({ token }).remove();
+    throw { code: 401, message: '登录已过期' };
+  }
+  const userResult = await usersCollection.doc(session.user_id).get();
   if (userResult.data.length === 0) throw { code: 401, message: '用户不存在' };
   if (userResult.data[0].status !== 'approved') {
     throw { code: 403, message: '账号未通过审批' };

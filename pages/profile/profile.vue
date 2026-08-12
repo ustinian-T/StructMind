@@ -22,6 +22,10 @@
         <text class="stat-num">{{ profile.practice_streak || 0 }}</text>
         <text class="stat-label">连续天数</text>
       </view>
+      <view class="stat-item" v-if="fsrsReviewCount > 0">
+        <text class="stat-num review">{{ fsrsReviewCount }}</text>
+        <text class="stat-label">待复习</text>
+      </view>
     </view>
 
     <!-- 题型掌握度 -->
@@ -31,6 +35,25 @@
         <view class="type-bars">
           <view class="type-row" v-for="item in typeAccuracyList" :key="item.label">
             <text class="type-label">{{ item.label }}</text>
+            <view class="type-track">
+              <view
+                class="type-fill"
+                :style="{ width: item.value + '%', background: item.value >= 70 ? '#16a34a' : item.value >= 40 ? '#e89c35' : '#dc2626' }"
+              ></view>
+            </view>
+            <text class="type-val">{{ item.value }}%</text>
+          </view>
+        </view>
+      </SmCard>
+    </view>
+
+    <!-- 概念掌握度 -->
+    <view class="section" v-if="conceptMastery.length">
+      <text class="section-title">概念掌握度</text>
+      <SmCard>
+        <view class="type-bars">
+          <view class="type-row" v-for="item in conceptMastery" :key="item.name">
+            <text class="type-label">{{ item.name }}</text>
             <view class="type-track">
               <view
                 class="type-fill"
@@ -112,6 +135,11 @@
         <text class="menu-text">学习仪表盘</text>
         <text class="menu-arrow">></text>
       </view>
+      <view class="menu-item spaced-item" @tap="spacedPractice">
+        <text class="menu-icon"></text>
+        <text class="menu-text">间隔练习{{ fsrsReviewCount > 0 ? ' · ' + fsrsReviewCount + '个概念待复习' : '' }}</text>
+        <text class="menu-arrow">></text>
+      </view>
     </view>
 
     <!-- 退出登录 -->
@@ -127,6 +155,7 @@
 import SmCard from '@/components/SmCard.vue'
 import SmButton from '@/components/SmButton.vue'
 import SmToast from '@/components/SmToast.vue'
+import { callCloud, normalizeCloudProfile } from '@/utils/cloud.js'
 // getApp() 是 uni-app 全局函数，无需导入
 
 export default {
@@ -136,9 +165,11 @@ export default {
       userName: '同学',
       userAccount: '',
       isAdmin: false,
-      profile: null,
-      chapterAccuracy: [],
-      practiceTrend: [],
+      profile: Object.create(null),
+      chapterAccuracy: Array(),
+      conceptMastery: Array(),
+      fsrsReviewCount: 0,
+      practiceTrend: Array(),
       trendTotal: 0,
       toastVisible: false,
       toastMsg: '',
@@ -182,18 +213,27 @@ export default {
       const token = app.globalData?.token
       if (!token) return
       try {
-        const apiBase = app.globalData.apiBase || 'https://datastytest.tshai.top'
-        const [profileRes, statsRes] = await Promise.all([
-          uni.request({ url: `${apiBase}/api/profile`, header: { Authorization: `Bearer ${token}` } }),
-          uni.request({ url: `${apiBase}/api/stats` }),
-        ])
-        this.profile = profileRes.data?.profile || null
-        const stats = statsRes.data || {}
+        const profileData = await callCloud('structmind-stats', 'userProfile', { token })
+        this.profile = profileData.profile ? normalizeCloudProfile(profileData.profile) : null
+        const stats = {
+          chapter_accuracy: this.profile?.chapter_accuracy || {},
+          daily_activity: this.profile?.daily_activity || {},
+          fsrs_review_count: this.profile?.fsrs_review_count || 0,
+        }
+
+        // FSRS review count
+        this.fsrsReviewCount = this.profile?.fsrs_review_count
+          || this.profile?.pending_review_count
+          || (stats.fsrs_review_count)
+          || 0
+
+        // Concept mastery may be present in the cloud profile response.
+        this.conceptMastery = this.extractConceptMastery(this.profile, stats)
 
         // 章节正确率
         const chAcc = stats.chapter_accuracy || {}
         this.chapterAccuracy = Object.entries(chAcc)
-          .map(([name, acc]) => ({ name, accuracy: Math.round(acc * 100) }))
+          .map(([name, acc]) => ({ name, accuracy: Math.round((Number(acc) || 0) * 100) }))
           .sort((a, b) => a.accuracy - b.accuracy)
 
         // 最近7天练习趋势
@@ -204,7 +244,7 @@ export default {
     },
     generateTrend(dailyActivity) {
       const now = new Date()
-      const days = []
+      const days = Array()
       let total = 0
       for (let i = 6; i >= 0; i--) {
         const d = new Date(now)
@@ -224,10 +264,52 @@ export default {
     goAdmin() { uni.navigateTo({ url: '/pages/admin/admin' }) },
     goWrong() { uni.navigateTo({ url: '/pages/wrong/wrong' }) },
     goDashboard() { uni.switchTab({ url: '/pages/index/index' }) },
-    handleLogout() {
+    extractConceptMastery(profile, stats) {
+      // Try profile.concept_mastery first, then stats, then fallback
+      const mastery = profile?.concept_mastery || stats?.concept_mastery || {}
+      if (!mastery || typeof mastery !== 'object') return []
+      return Object.entries(mastery)
+        .filter(([, v]) => !isNaN(Number(v)))
+        .map(([name, val]) => ({ name, value: Math.round((Number(val) || 0) * 100) }))
+        .sort((a, b) => a.value - b.value)
+    },
+    async spacedPractice() {
       const app = getApp()
-      const g = app.globalData; g.token = null; g.user = null; uni.removeStorageSync('auth')
+      const token = app.globalData?.token
+      if (!token) {
+        uni.showToast({ title: '请先登录', icon: 'none' })
+        return
+      }
+      try {
+        const data = await callCloud('structmind-practice', 'createSession', {
+          token,
+          mode: 'random',
+          limit: 15,
+          include_wrong: true,
+        })
+        if (data.questions?.length) {
+          const qCount = data.questions.length
+          this.showToast(`已生成${qCount}题间隔复习`, 'success')
+        } else {
+          this.showToast('暂无可复习内容，继续加油！', 'info')
+        }
+      } catch (e) {
+        this.showToast('间隔复习请求失败，请稍后重试', 'error')
+      }
+    },
+    async handleLogout() {
+      const app = getApp()
+      const g = app.globalData
+      try {
+        if (g.token) await callCloud('structmind-auth', 'logout', { token: g.token })
+      } catch (e) {}
+      g.token = null; g.user = null; uni.removeStorageSync('auth')
       uni.reLaunch({ url: '/pages/login/login' })
+    },
+    showToast(msg, type = 'info') {
+      this.toastMsg = msg
+      this.toastType = type
+      this.toastVisible = true
     },
   },
 }
@@ -266,6 +348,7 @@ export default {
 }
 .stat-num { font-size: 24px; font-weight: 700; color: #1a2b28; }
 .stat-num.accent { color: #2d8a7b; }
+.stat-num.review { color: #e89c35; }
 .stat-label { font-size: 12px; color: #6b8280; margin-top: 2px; }
 
 /* Sections */
@@ -324,6 +407,8 @@ export default {
   padding: 16px 18px; border-bottom: 1px solid #f5f5f5;
 }
 .menu-item:last-child { border-bottom: none; }
+.menu-item.spaced-item { background: rgba(45,138,123,0.04); }
+.menu-item.spaced-item .menu-text { color: #2d8a7b; }
 .menu-icon { font-size: 20px; }
 .menu-text { flex: 1; font-size: 15px; color: #1a2b28; font-weight: 500; }
 .menu-arrow { font-size: 18px; color: #c0c8c5; }

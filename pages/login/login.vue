@@ -8,7 +8,7 @@
       </view>
     </view>
 
-    <view class="login-card">
+    <form class="login-card" @submit="handleLogin">
       <text class="card-title">欢迎回来</text>
       <text class="card-desc">登录你的学习账号继续练习</text>
 
@@ -37,7 +37,7 @@
         <text>{{ errorMsg }}</text>
       </view>
 
-      <button class="login-btn" @tap="handleLogin" :disabled="loading || !account || !password">
+      <button class="login-btn" form-type="submit" :disabled="loading || !account || !password">
         <text v-if="!loading">登 录</text>
         <text v-else>登录中...</text>
       </button>
@@ -45,7 +45,7 @@
       <view class="login-footer">
         <text class="footer-link" @tap="goRegister">还没有账号？立即注册</text>
       </view>
-    </view>
+    </form>
 
     <view class="login-bottom">
       <text class="bottom-text">© 2026 StructMind · 谭书宏</text>
@@ -55,6 +55,7 @@
 </template>
 
 <script>
+import { callCloud, getErrorMessage } from '@/utils/cloud.js'
 // getApp() 是 uni-app 全局函数，无需导入
 
 export default {
@@ -76,33 +77,21 @@ export default {
       this.errorMsg = ''
       try {
         const app = getApp()
-        const gd = (app && app.globalData) ? app.globalData : {}
-        const apiBase = gd.apiBase || 'https://datastytest.tshai.top'
-        const res = await uni.request({
-          url: `${apiBase}/api/auth/login`,
-          method: 'POST',
-          header: { 'Content-Type': 'application/json' },
-          data: {
-            account: this.account.trim(),
-            password: this.password,
-          },
+        const data = await callCloud('structmind-auth', 'login', {
+          account: this.account.trim(),
+          password: this.password,
         })
-        const data = (res && res.data) ? res.data : {}
         if (data.token && data.user) {
           const g = app.globalData || {}
           g.token = data.token
           g.user = data.user
           uni.setStorageSync('auth', JSON.stringify({ token: data.token, user: data.user }))
           uni.reLaunch({ url: '/pages/index/index' })
-        } else if (data.error) {
-          this.errorMsg = data.error
         } else {
           this.errorMsg = '登录失败，请重试'
         }
       } catch (err) {
-        const errObj = err || {}
-        const msg = (errObj.data && errObj.data.error) || errObj.message || errObj.errMsg || '登录失败，请检查网络连接'
-        this.errorMsg = msg
+        this.errorMsg = getErrorMessage(err, '登录失败，请检查网络连接')
       } finally {
         this.loading = false
       }

@@ -3,38 +3,36 @@
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, AsyncIterator
 
 from fastapi.responses import StreamingResponse
 
 
-def sse_stream(sync_generator) -> StreamingResponse:
-    """将同步生成器包装为 SSE StreamingResponse。
+def sse_stream(event_iterator: AsyncIterator[Any]) -> StreamingResponse:
+    """Serialize one asynchronous Agent event iterator as SSE.
 
     Usage:
         @router.post("/api/ai/tutor/stream")
         async def tutor_stream(...):
-            return sse_stream(socratic_tutor_stream(...))
+            return sse_stream(orchestrator.stream(...))
     """
 
     async def event_stream() -> AsyncGenerator[str, None]:
-        import asyncio
-
-        loop = asyncio.get_event_loop()
         try:
-            for item in sync_generator:
+            async for item in event_iterator:
+                if hasattr(item, "model_dump"):
+                    item = item.model_dump(mode="json")
                 yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
         except Exception as exc:
-            yield f"data: {json.dumps({'error': str(exc), 'done': True}, ensure_ascii=False)}\n\n"
-        finally:
-            yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'protocol': 'structmind.agent.v1', 'type': 'error', 'message': str(exc)}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream; charset=utf-8",
         headers={
-            "Cache-Control": "no-store",
-            "Connection": "close",
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
             "X-Content-Type-Options": "nosniff",
         },
     )

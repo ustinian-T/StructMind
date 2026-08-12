@@ -11,6 +11,9 @@ sys.path.insert(0, ROOT)
 import hashlib
 import json
 import pytest
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+from fastapi.testclient import TestClient
 
 # ═══ 密码哈希测试 ═══
 from src.db.database import hash_password, verify_password
@@ -243,6 +246,7 @@ def test_generate_token_unique():
 import tempfile
 from pathlib import Path
 from src.db.database import PracticeDatabase
+from src.config import ADMIN_ACCOUNT
 
 
 @pytest.fixture
@@ -294,6 +298,42 @@ def test_admin_approval_flow(temp_db):
     assert rejected["status"] == "rejected"
 
 
+def test_ensure_admin_repairs_existing_credentials_role_and_status(temp_db):
+    temp_db.create_user(ADMIN_ACCOUNT, "OldPass123", "旧管理员", "13800138000")
+    with temp_db.connect() as conn:
+        conn.execute(
+            "UPDATE users SET role = 'student', status = 'rejected' WHERE account = ?",
+            (ADMIN_ACCOUNT,),
+        )
+    old_admin = temp_db.authenticate(ADMIN_ACCOUNT, "OldPass123")
+    old_token = temp_db.create_session(old_admin["id"])
+    for _ in range(5):
+        temp_db.record_login_attempt(ADMIN_ACCOUNT, "127.0.0.1", False)
+
+    admin = temp_db.ensure_admin(
+        ADMIN_ACCOUNT,
+        "NewPass456",
+        "管理员",
+        "13800000000",
+    )
+
+    assert admin["role"] == "admin"
+    assert admin["status"] == "approved"
+    assert temp_db.authenticate(ADMIN_ACCOUNT, "NewPass456") == admin
+    assert temp_db.authenticate(ADMIN_ACCOUNT, "OldPass123") is None
+    assert temp_db.get_session(old_token) is None
+
+
+def test_successful_login_resets_previous_failure_count(temp_db):
+    temp_db.create_user("counteruser", "RightPass123", "计数测试", "13800138000")
+    for _ in range(4):
+        assert temp_db.authenticate("counteruser", "WrongPass123") is None
+
+    assert temp_db.authenticate("counteruser", "RightPass123") is not None
+    assert temp_db.authenticate("counteruser", "WrongPass123") is None
+    assert temp_db.authenticate("counteruser", "RightPass123") is not None
+
+
 def test_session_lifecycle(temp_db):
     user = temp_db.create_user("sessuser", "Pass1234Z", "会话测试", "13800138000")
     temp_db.approve_user(user["id"], True)
@@ -304,6 +344,128 @@ def test_session_lifecycle(temp_db):
     assert session["user_id"] == user["id"]
     temp_db.delete_session(token)
     assert temp_db.get_session(token) is None
+
+
+def test_conversation_access_is_scoped_to_owner(temp_db):
+    first = temp_db.create_user("convowner", "OwnerPass123", "用户一", "13800138000")
+    second = temp_db.create_user("convother", "OtherPass123", "用户二", "13800138001")
+    conversation_id = temp_db.save_conversation(
+        first["id"], None, "tutor", [{"role": "user", "content": "原始内容"}],
+    )
+
+    assert temp_db.get_conversation(conversation_id, second["id"]) is None
+    with pytest.raises(KeyError, match="对话不存在"):
+        temp_db.update_conversation(
+            conversation_id,
+            second["id"],
+            [{"role": "user", "content": "越权修改"}],
+        )
+
+    updated = [{"role": "user", "content": "本人修改"}]
+    temp_db.update_conversation(conversation_id, first["id"], updated)
+    assert temp_db.get_conversation(conversation_id, first["id"])["messages"] == updated
+
+
+def test_tutor_stream_matches_frontend_protocol_and_returns_conversation_id(temp_db, monkeypatch):
+    from src.routes import api_router
+
+    user = temp_db.create_user("streamuser", "StreamPass123", "流式测试", "13800138000")
+    temp_db.approve_user(user["id"], True)
+    token = temp_db.create_session(user["id"])
+
+    from src.agents.orchestrator import ModelStreamEvent
+
+    class FakeGateway:
+        async def stream(self, **kwargs):
+            yield ModelStreamEvent(type="delta", content="第一段")
+            yield ModelStreamEvent(type="delta", content="第二段")
+            yield ModelStreamEvent(type="done", finish_reason="stop")
+
+    class EmptyBank:
+        by_id = {}
+
+    test_app = FastAPI()
+    test_app.state.db = temp_db
+    test_app.state.exam_bank = EmptyBank()
+    test_app.state.agent_gateway_factory = lambda model=None: FakeGateway()
+    test_app.state._json_response = lambda body, status=200: JSONResponse(body, status_code=status)
+    test_app.include_router(api_router)
+
+    with TestClient(test_app) as client:
+        response = client.post(
+            "/api/ai/tutor/stream",
+            json={"message": "请引导我理解栈"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 200
+    events = [
+        json.loads(line.removeprefix("data: "))
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    assert [event["content"] for event in events if event["type"] == "delta"] == [
+        "第一段", "第二段",
+    ]
+    assert all(event["protocol"] == "structmind.agent.v1" for event in events)
+    done = next(event for event in events if event.get("type") == "done")
+    assert isinstance(done["conversation_id"], int)
+    assert temp_db.get_conversation(done["conversation_id"], user["id"])["messages"][-1] == {
+        "role": "assistant",
+        "content": "第一段第二段",
+    }
+
+
+def test_tutor_websocket_authenticates_streams_and_saves_conversation(temp_db, monkeypatch):
+    from src.routes.ai import websocket_router
+
+    user = temp_db.create_user("wsuser", "SocketPass123", "连接测试", "13800138000")
+    temp_db.approve_user(user["id"], True)
+    token = temp_db.create_session(user["id"])
+
+    from src.agents.orchestrator import ModelStreamEvent
+
+    class FakeGateway:
+        async def stream(self, **kwargs):
+            yield ModelStreamEvent(type="delta", content="甲")
+            yield ModelStreamEvent(type="delta", content="乙")
+            yield ModelStreamEvent(type="done", finish_reason="stop")
+
+    class EmptyBank:
+        by_id = {}
+
+    test_app = FastAPI()
+    test_app.state.db = temp_db
+    test_app.state.exam_bank = EmptyBank()
+    test_app.state.agent_gateway_factory = lambda model=None: FakeGateway()
+    test_app.include_router(websocket_router)
+
+    with TestClient(test_app) as client:
+        with client.websocket_connect("/ws/tutor") as websocket:
+            websocket.send_json({"type": "auth", "token": token})
+            assert websocket.receive_json() == {"type": "auth", "ok": True}
+            websocket.send_json({"type": "message", "message": "什么是队列？"})
+            events = [websocket.receive_json() for _ in range(5)]
+
+    assert [event["content"] for event in events if event["type"] == "delta"] == ["甲", "乙"]
+    assert all(event["protocol"] == "structmind.agent.v1" for event in events)
+    done = next(event for event in events if event["type"] == "done")
+
+    assert done["type"] == "done"
+    assert isinstance(done["conversation_id"], int)
+    assert temp_db.get_conversation(done["conversation_id"], user["id"])["messages"][-1]["content"] == "甲乙"
+
+
+def test_docker_deployment_binds_to_container_interface():
+    dockerfile = Path(ROOT, "Dockerfile").read_text(encoding="utf-8")
+    assert "ENV SM_HOST=0.0.0.0" in dockerfile
+
+
+def test_docker_build_excludes_secrets_and_runtime_database():
+    dockerignore = Path(ROOT, ".dockerignore").read_text(encoding="utf-8").splitlines()
+    assert ".env" in dockerignore
+    assert "runtime/" in dockerignore
+    assert ".git/" in dockerignore
 
 
 # ═══ Router Agent 测试 ═══

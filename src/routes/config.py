@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Request
 from src.ai.providers import config_payload, update_runtime_config
 from src.services.parser import stats_payload
 from src.models.schemas import ConfigUpdateRequest, BankUploadRequest, BankGetRequest
-from src.routes.deps import require_auth, parse_auth_header, make_error_response
+from src.routes.deps import require_admin, require_auth, parse_auth_header, make_error_response
 
 router = APIRouter(tags=["config"])
 
@@ -20,7 +20,10 @@ async def get_config():
 
 
 @router.post("/config")
-async def update_config(req: ConfigUpdateRequest):
+async def update_config(
+    req: ConfigUpdateRequest,
+    _admin=Depends(require_admin),
+):
     try:
         return update_runtime_config(req.model_dump(exclude_none=True))
     except Exception as exc:

@@ -393,6 +393,20 @@ tbody td { padding: 10px 12px; border-bottom: 1px solid var(--border-light); }
 
 @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
+/* ═══ Typing Dots (Streaming Indicator) ═══ */
+.typing-dots { display: inline-flex; gap: 4px; margin-left: 4px; vertical-align: middle; }
+.typing-dots span {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--sm-primary); animation: dotBounce 1.4s ease-in-out infinite;
+  font-size: 0; line-height: 0; color: transparent;
+}
+.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes dotBounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.3; }
+  40% { transform: translateY(-8px); opacity: 1; }
+}
+
 /* ═══ Empty State ═══ */
 .empty {
   padding: 40px 20px; text-align: center; color: var(--muted);

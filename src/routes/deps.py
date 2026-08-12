@@ -6,9 +6,14 @@
 from __future__ import annotations
 
 import re
+import secrets
+import threading
+import time
 from typing import Any
 
-from fastapi import Header, Request
+from fastapi import Depends, Header, HTTPException, Request
+
+from src.config import AGENT_SERVICE_KEY, AI_RATE_LIMIT_MAX_REQUESTS, AI_RATE_LIMIT_WINDOW
 
 
 # ═══ 数据库 / 题库依赖 ═══
@@ -72,6 +77,60 @@ async def require_admin(
     if session.get("role") != "admin":
         raise PermissionError("仅管理员可执行此操作。")
     return session
+
+
+def consume_ai_quota(app, user_id: int) -> None:
+    """Consume one AI request from a per-process, per-user sliding window."""
+    max_requests = max(
+        1,
+        int(getattr(app.state, "ai_rate_limit_max", AI_RATE_LIMIT_MAX_REQUESTS)),
+    )
+    window = max(
+        1,
+        int(getattr(app.state, "ai_rate_limit_window", AI_RATE_LIMIT_WINDOW)),
+    )
+    if not hasattr(app.state, "ai_rate_limit_buckets"):
+        app.state.ai_rate_limit_buckets = {}
+        app.state.ai_rate_limit_lock = threading.Lock()
+
+    now = time.monotonic()
+    cutoff = now - window
+    with app.state.ai_rate_limit_lock:
+        bucket = app.state.ai_rate_limit_buckets.setdefault(user_id, [])
+        bucket[:] = [timestamp for timestamp in bucket if timestamp > cutoff]
+        if len(bucket) >= max_requests:
+            retry_after = max(1, int(window - (now - bucket[0])))
+            raise HTTPException(
+                status_code=429,
+                detail="AI 请求过于频繁，请稍后重试。",
+                headers={"Retry-After": str(retry_after)},
+            )
+        bucket.append(now)
+
+
+async def require_ai_access(
+    request: Request,
+    session: dict[str, Any] = Depends(require_auth),
+) -> dict[str, Any]:
+    """Require an approved user and charge one request to that user's AI quota."""
+    consume_ai_quota(request.app, int(session["user_id"]))
+    return session
+
+
+async def require_agent_service(
+    x_structmind_service_key: str | None = Header(
+        default=None,
+        alias="X-StructMind-Service-Key",
+    ),
+) -> None:
+    """Authenticate the uniCloud-to-FastAPI Agent proxy without user quota."""
+    if not AGENT_SERVICE_KEY:
+        raise HTTPException(status_code=503, detail="Agent 服务代理尚未配置。")
+    if not x_structmind_service_key or not secrets.compare_digest(
+        x_structmind_service_key,
+        AGENT_SERVICE_KEY,
+    ):
+        raise HTTPException(status_code=403, detail="Agent 服务凭据无效。")
 
 
 # ═══ 输入验证 ═══

@@ -91,19 +91,15 @@ def fill_candidates(answer: str) -> list[str]:
     answer = answer.strip()
     parts = re.findall(r"\(\s*\d+\s*\)\s*([^\n]+)", answer)
     text = " ".join(parts) if parts else answer
-    # 仅在纯中文上下文中以 / 分割备选答案，避免破坏数学公式
-    if re.search(r"[一-鿿]或[一-鿿]|[一-鿿]/[一-鿿]|、", text):
-        candidates = re.split(r"\s*(?:或|、)\s*", text)
-        # 进一步分割 / 仅当它处于中文文本之间时
-        expanded = []
-        for c in candidates:
-            if re.search(r"[一-鿿]/[一-鿿]", c):
-                expanded.extend(re.split(r"(?<=[一-鿿])/(?=[一-鿿])", c))
-            else:
-                expanded.append(c)
-        candidates = expanded
-    else:
-        candidates = [text]
+    # “或/、”明确表示备选答案；斜杠只在中文词之间拆分，避免破坏数学公式。
+    candidates = re.split(r"\s*(?:或|、)\s*", text)
+    expanded = []
+    for candidate in candidates:
+        if re.search(r"[一-鿿]/[一-鿿]", candidate):
+            expanded.extend(re.split(r"(?<=[一-鿿])/(?=[一-鿿])", candidate))
+        else:
+            expanded.append(candidate)
+    candidates = expanded
     normalized = [normalize_fill(item) for item in candidates if normalize_fill(item)]
     return normalized or [normalize_fill(answer)]
 
@@ -339,6 +335,7 @@ class PracticeDatabase:
                     options_json TEXT NOT NULL,
                     answer TEXT NOT NULL,
                     analysis TEXT NOT NULL,
+                    stem_hash TEXT,
                     created_at REAL NOT NULL,
                     user_id INTEGER DEFAULT 0
                 );
@@ -476,6 +473,18 @@ class PracticeDatabase:
                 db.execute("ALTER TABLE attempts ADD COLUMN chapter TEXT DEFAULT ''")
             except sqlite3.OperationalError:
                 pass
+            try:
+                db.execute("ALTER TABLE ai_questions ADD COLUMN stem_hash TEXT")
+            except sqlite3.OperationalError:
+                pass
+            legacy_ai_questions = db.execute(
+                "SELECT id, stem FROM ai_questions WHERE stem_hash IS NULL OR stem_hash = ''"
+            ).fetchall()
+            for row in legacy_ai_questions:
+                db.execute(
+                    "UPDATE ai_questions SET stem_hash = ? WHERE id = ?",
+                    (text_hash(row["stem"]), row["id"]),
+                )
 
     # ── 练习记录 ──
 
@@ -510,12 +519,14 @@ class PracticeDatabase:
         with self.connect() as db:
             db.execute(
                 """INSERT INTO ai_questions
-                    (id, model, source_question_id, qtype, stem, options_json, answer, analysis, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (id, model, source_question_id, qtype, stem, options_json,
+                     answer, analysis, stem_hash, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     ai_id, model, source_question_id, item["qtype"], item["stem"],
                     json.dumps(item.get("options", []), ensure_ascii=False),
-                    item["answer"], item.get("analysis", ""), time.time(),
+                    item["answer"], item.get("analysis", ""),
+                    text_hash(item["stem"]), time.time(),
                 ),
             )
         return ai_id
@@ -710,8 +721,9 @@ class PracticeDatabase:
                 raise ValueError("该账号已被注册。")
             password_hash = hash_password(password)
             now = time.time()
-            role = "admin" if account == ADMIN_ACCOUNT else "student"
-            status = "approved" if account == ADMIN_ACCOUNT else "pending"
+            # 普通创建路径永远不能提升权限；管理员只能由 ensure_admin 引导。
+            role = "student"
+            status = "pending"
             cursor = db.execute(
                 """INSERT INTO users (account, password_hash, name, phone, role, status, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
@@ -726,6 +738,50 @@ class PracticeDatabase:
                 "id": user_id, "account": account, "name": name,
                 "phone": phone, "role": role, "status": status,
             }
+
+    def ensure_admin(self, account: str, password: str, name: str, phone: str) -> dict[str, Any]:
+        """Create or reconcile the configured administrator account."""
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM users WHERE account = ?", (account,)).fetchone()
+            if not row:
+                password_hash = hash_password(password)
+                now = time.time()
+                cursor = db.execute(
+                    """INSERT INTO users (account, password_hash, name, phone, role, status, created_at)
+                       VALUES (?, ?, ?, ?, 'admin', 'approved', ?)""",
+                    (account, password_hash, name, phone, now),
+                )
+                user_id = cursor.lastrowid
+                db.execute(
+                    "INSERT OR IGNORE INTO user_profile (user_id, updated_at) VALUES (?, ?)",
+                    (user_id, now),
+                )
+            else:
+                user_id = row["id"]
+                credentials_changed = not verify_password(password, row["password_hash"])
+                privileges_changed = row["role"] != "admin" or row["status"] != "approved"
+                password_hash = hash_password(password) if credentials_changed else row["password_hash"]
+                db.execute(
+                    """UPDATE users
+                       SET password_hash = ?, role = 'admin', status = 'approved'
+                       WHERE id = ?""",
+                    (password_hash, user_id),
+                )
+                if credentials_changed or privileges_changed:
+                    db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+
+            # The configured administrator must be recoverable after a password
+            # rotation or stale failed-attempt records from an older deployment.
+            db.execute(
+                "DELETE FROM login_attempts WHERE account = ? AND success = 0",
+                (account,),
+            )
+
+            current = db.execute(
+                "SELECT id, account, name, phone, role, status FROM users WHERE id = ?",
+                (user_id,),
+            ).fetchone()
+            return dict(current)
 
     def authenticate(self, account: str, password: str, ip: str = "") -> dict[str, Any] | None:
         if self.is_account_locked(account):
@@ -744,6 +800,11 @@ class PracticeDatabase:
 
     def record_login_attempt(self, account: str, ip: str, success: bool) -> None:
         with self.connect() as db:
+            if success:
+                db.execute(
+                    "DELETE FROM login_attempts WHERE account = ? AND success = 0",
+                    (account,),
+                )
             db.execute(
                 "INSERT INTO login_attempts (account, ip, success, created_at) VALUES (?, ?, ?, ?)",
                 (account, ip, 1 if success else 0, time.time()),
@@ -1025,7 +1086,37 @@ class PracticeDatabase:
                 for row in rows
             ]
 
-    def get_all_question_stems_and_hashes(self) -> list[dict[str, Any]]:
+    def get_conversation(self, conversation_id: int, user_id: int) -> dict[str, Any] | None:
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT * FROM ai_conversations WHERE id = ? AND user_id = ?",
+                (conversation_id, user_id),
+            ).fetchone()
+            if not row:
+                return None
+            return {
+                "id": row["id"], "user_id": row["user_id"],
+                "question_id": row["question_id"], "mode": row["mode"],
+                "messages": json.loads(row["messages_json"]),
+                "created_at": row["created_at"], "updated_at": row["updated_at"],
+            }
+
+    def update_conversation(
+        self,
+        conversation_id: int,
+        user_id: int,
+        messages: list[dict[str, str]],
+    ) -> None:
+        with self.connect() as db:
+            result = db.execute(
+                """UPDATE ai_conversations SET messages_json = ?, updated_at = ?
+                   WHERE id = ? AND user_id = ?""",
+                (json.dumps(messages, ensure_ascii=False), time.time(), conversation_id, user_id),
+            )
+            if result.rowcount != 1:
+                raise KeyError("对话不存在。")
+
+    def get_all_question_stems_and_hashes(self) -> list[str]:
         hashes: set[str] = set()
         with self.connect() as db:
             rows = db.execute("SELECT stem_hash FROM ai_questions").fetchall()

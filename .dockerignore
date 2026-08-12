@@ -1,0 +1,11 @@
+.git/
+.idea/
+.claude/
+.playwright-cli/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+.env
+runtime/
+output/
+unpackage/

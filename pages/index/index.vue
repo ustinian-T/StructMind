@@ -80,6 +80,7 @@
 </template>
 
 <script>
+import { callCloud, normalizeCloudProfile } from '@/utils/cloud.js'
 // getApp() 是 uni-app 全局函数，无需导入
 
 export default {
@@ -87,7 +88,7 @@ export default {
     return {
       isLoggedIn: false,
       userName: '同学',
-      profile: null,
+      profile: Object.create(null),
     }
   },
   computed: {
@@ -108,13 +109,8 @@ export default {
 
     if (auth.token) {
       try {
-        const apiBase = app.globalData.apiBase || 'https://datastytest.tshai.top'
-        const res = await uni.request({
-          url: `${apiBase}/api/profile`,
-          method: 'GET',
-          header: { Authorization: `Bearer ${auth.token}` },
-        })
-        this.profile = res.data?.profile || null
+        const data = await callCloud('structmind-stats', 'userProfile', { token: auth.token })
+        this.profile = data.profile ? normalizeCloudProfile(data.profile) : null
       } catch (err) {
         console.log('Failed to load profile')
       }

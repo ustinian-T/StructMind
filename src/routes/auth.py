@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Header, Request
 
 from src.models.schemas import LoginRequest, RegisterRequest
+from src.config import ADMIN_ACCOUNT
 from src.routes.deps import (
     get_db,
     require_auth,
@@ -23,6 +24,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 async def register(req: RegisterRequest, request: Request):
     try:
         account = validate_account(req.account)
+        if account == ADMIN_ACCOUNT:
+            raise PermissionError("该账号为系统保留管理员账号，不能公开注册。")
         password = validate_password(req.password)
         name = validate_name(req.name)
         phone = validate_phone(req.phone)

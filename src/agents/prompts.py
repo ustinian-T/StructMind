@@ -35,17 +35,6 @@ SOCRATIC_SYSTEM_PROMPT = """你是 StructMind 数据结构课程的苏格拉底�
 - 算法复杂度分析
 """
 
-ROUTER_SYSTEM_PROMPT = "你是教学对话分类器。根据学生的问题和上下文，将其划分到唯一类别。只输出JSON。"
-
-ANALYSIS_SYSTEM_PROMPT = (
-    "你是教学分析专家。分析数据结构学生的学习状况，给出诊断和教学建议。"
-    "你的输出不会直接展示给学生，而是传递给Mentor助教作为教学参考。只输出JSON。"
-)
-
-EVALUATOR_SYSTEM_PROMPT = (
-    "你是学习评估专家。评估学生在数据结构对话中的理解程度，决定下一步行动。只输出JSON。"
-)
-
 QUESTION_GEN_SYSTEM_PROMPT = (
     "你是数据结构期末考试命题老师。根据参考题目生成全新的练习题。"
     "只输出JSON。确保题目不与已有题目重复。"

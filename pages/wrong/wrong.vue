@@ -33,6 +33,7 @@
 </template>
 
 <script>
+import { callCloud, normalizeCloudQuestion } from '@/utils/cloud.js'
 // getApp() 是 uni-app 全局函数，无需导入
 
 export default {
@@ -45,13 +46,15 @@ export default {
     try {
       const app = getApp()
       const auth = app.globalData
-      const apiBase = app.globalData.apiBase || 'https://datastytest.tshai.top'
-      const res = await uni.request({
-        url: `${apiBase}/api/wrong`,
-        method: 'GET',
-        header: auth.token ? { Authorization: `Bearer ${auth.token}` } : {},
+      const data = await callCloud('structmind-practice', 'getWrongQuestions', {
+        token: auth.token,
+        page_size: 100,
       })
-      this.wrongItems = res.data?.items || []
+      this.wrongItems = (data.questions || []).map(raw => {
+        const question = normalizeCloudQuestion(raw)
+        question.answer = '请重新作答后查看'
+        return { attempt_id: question.id, question, user_answer: '—' }
+      })
     } catch (err) {
       console.log('Failed to load wrong items')
     }

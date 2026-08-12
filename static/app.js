@@ -25,13 +25,15 @@ const S = {
   // Misc
   wrongItems: [], discussionResult: null, selectedDiscussionId: null,
   toast: '', loading: false, modal: null,
+  eventsBound: false,
 };
 
 // ═══ API ═══
+const API_BASE = String(window.STRUCTMIND_API_BASE || '').replace(/\/$/, '');
 async function api(path, opts={}) {
   const headers = { 'Content-Type': 'application/json', ...(opts.headers||{}) };
   if (S.token) headers['Authorization'] = `Bearer ${S.token}`;
-  const res = await fetch(path, { ...opts, headers });
+  const res = await fetch(API_BASE + path, { ...opts, headers });
   const data = await res.json().catch(()=>({}));
   if (!res.ok) throw new Error(data.error || `请求失败: ${res.status}`);
   return data;
@@ -40,7 +42,7 @@ async function api(path, opts={}) {
 async function streamApi(path, payload, onEvent) {
   const headers = { 'Content-Type': 'application/json' };
   if (S.token) headers['Authorization'] = `Bearer ${S.token}`;
-  const res = await fetch(path, { method:'POST', headers, body: JSON.stringify(payload) });
+  const res = await fetch(API_BASE + path, { method:'POST', headers, body: JSON.stringify(payload) });
   if (!res.ok) { const d = await res.json().catch(()=>({})); throw new Error(d.error||`请求失败`); }
   if (!res.body) throw new Error('浏览器不支持流式读取');
   const reader = res.body.getReader(), decoder = new TextDecoder('utf-8');
@@ -70,19 +72,23 @@ function isAdmin() { return S.user?.role === 'admin'; }
 async function handleLogin(account, password) {
   const d = await api('/api/auth/login', { method:'POST', body: JSON.stringify({account, password}) });
   S.token = d.token; S.user = d.user; saveAuth();
+  connectWsTutor();
 }
 async function handleRegister(account, password, name, phone) {
   return api('/api/auth/register', { method:'POST', body: JSON.stringify({account, password, name, phone}) });
 }
 async function handleLogout() {
   try { await api('/api/auth/logout', { method:'POST' }); } catch(e) {}
+  if (S.wsReconnectTimer) { clearTimeout(S.wsReconnectTimer); S.wsReconnectTimer = null; }
+  if (S.ws) { S.ws.onclose = null; S.ws.close(); S.ws = null; }
+  S.wsConnected = false;
   clearAuth(); S.profile = null; S.tab = 'dashboard'; S.modal = null; render();
 }
 
 // ═══ Init ═══
 async function init() {
   loadAuth();
-  connectWsTutor();
+  if (S.token) connectWsTutor();
   try {
     const [stats, config, discussions] = await Promise.all([api('/api/stats'), api('/api/config'), api('/api/discussions')]);
     S.stats = stats; S.config = config; S.discussions = discussions.discussions||[];
@@ -92,7 +98,9 @@ async function init() {
     }
     render();
   } catch(e) {
-    document.querySelector('#app').innerHTML = `<main class="boot"><p>${esc(e.message)}</p></main>`;
+    const app = document.querySelector('#app');
+    app.innerHTML = `<main class="boot boot-error" id="main-content"><div class="boot-error-mark" aria-hidden="true">!</div><h1>学习台暂时无法加载</h1><p>请确认服务已启动或网络连接正常，然后重试。</p><button class="btn btn-primary" id="retryBoot">重新加载</button></main>`;
+    app.querySelector('#retryBoot')?.addEventListener('click', init, {once:true});
   }
 }
 
@@ -108,41 +116,59 @@ function render() {
   document.querySelector('#app').innerHTML = S.modal
     ? renderModal() + renderShell()
     : renderShell();
-  bindEvents();
+  if (!S.eventsBound) bindEvents();
 }
 
 function renderShell() {
   const title = pageTitle();
   return `<div class="app-shell">
-    <aside class="sidebar">
-      <div class="brand">
+    <aside class="sidebar" aria-label="主导航">
+      <div class="brand" aria-label="StructMind 数据结构学习工作台">
         <img src="/logo.svg" class="brand-logo" alt="StructMind"/>
-        <div><h1>${APP.name}</h1><p>${APP.subtitle}</p></div>
+        <div><h1>${APP.name}</h1><p>学习工作台</p></div>
       </div>
-      <nav class="nav">${navItems().map(([k,l,i])=>`
-        <button class="nav-btn ${S.tab===k?'active':''}" data-tab="${k}">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${icons[i]||''}</svg>
+      <nav class="nav">${navItems().map(([k,l,icon])=>`
+        <button class="nav-btn ${S.tab===k?'active':''}" data-tab="${k}" ${S.tab===k?'aria-current="page"':''}>
+          <svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">${icons[icon]||''}</svg>
           <span>${l}</span>
         </button>`).join('')}</nav>
+      <div class="sidebar-system">
+        <button class="system-status" data-tab="settings" aria-label="查看系统状态">
+          <span class="status-mark ${anyAIConfigured()?'ready':'attention'}" aria-hidden="true"></span>
+          <span><strong>系统状态</strong><small>${anyAIConfigured()?`${esc(S.config.default_model)} 可用`:'AI 尚未配置'}</small></span>
+        </button>
+      </div>
       ${isLoggedIn() ? `
-        <div class="sidebar-user" data-action="profile">
+        <div class="sidebar-user">
           <div class="user-avatar">${(S.user.name||'?')[0]}</div>
-          <div><div class="user-name">${esc(S.user.name)}</div><div class="user-role">${isAdmin()?'管理员':'学生'} · ${profileAccuracy()}%</div></div>
+          <div class="user-copy"><div class="user-name">${esc(S.user.name)}</div><div class="user-role">${isAdmin()?'管理员':'学生'} · 正确率 ${profileAccuracy()}%</div></div>
+          <button class="icon-button" data-action="logout" aria-label="退出登录" title="退出登录">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/><path d="M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5"/></svg>
+          </button>
         </div>` : `
-        <button class="btn btn-primary" style="margin-top:auto;width:100%" data-action="showLogin">登录 / 注册</button>`}
+        <button class="btn btn-primary sidebar-login" data-action="showLogin">登录学习</button>`}
     </aside>
-    <main class="main">
+    <main class="main" id="main-content" tabindex="-1">
       <header class="topbar">
-        <div><h2>${title.title}</h2><p>${title.subtitle}</p></div>
+        <div class="page-heading"><h2>${title.title}</h2><p>${title.subtitle}</p></div>
         <div class="topbar-right">
-          ${isAdmin()?`<button class="btn btn-soft btn-sm" data-tab="admin">🔐 管理审批</button>`:''}
-          <span id="wsStatus" class="ai-status ${S.wsConnected?'online':''}"><span class="dot ${S.wsConnected?'':'offline'}"></span>${S.wsConnected?'WS已连接':'WS未连接'}</span>
-          <span class="ai-status ${anyAIConfigured()?'online':''}"><span class="dot ${anyAIConfigured()?'':'offline'}"></span>${anyAIConfigured()?`AI已连接·${esc(S.config.default_model)}`:'AI未配置'}</span>
+          ${isAdmin()?`<button class="btn btn-quiet btn-sm" data-tab="admin">管理审批</button>`:''}
+          <button class="status-button" data-tab="settings">
+            <span id="wsStatus" class="status-mark ${S.wsConnected?'ready':'muted'}" aria-hidden="true"></span>
+            <span>${anyAIConfigured()?'AI 导师可用':'配置 AI 导师'}</span>
+          </button>
         </div>
       </header>
       <div class="content-area">${renderTab()}</div>
-      <footer class="footer">${APP.name} · ${APP.subtitle} · ©️谭书宏<br><a href="https://beian.miit.gov.cn" target="_blank" rel="noopener" style="color:var(--muted);text-decoration:none">湘ICP备2026021754号-2</a></footer>
+      <footer class="footer"><span>${APP.name} · 数据结构学习工作台</span><a href="https://beian.miit.gov.cn" target="_blank" rel="noopener">湘ICP备2026021754号-2</a></footer>
     </main>
+    <nav class="bottom-nav" aria-label="移动端导航">
+      ${navItems().filter(([k])=>['dashboard','practice','ai','wrong'].includes(k)).map(([k,l,icon])=>`
+        <button class="bottom-nav-item ${S.tab===k?'active':''}" data-tab="${k}" ${S.tab===k?'aria-current="page"':''}>
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">${icons[icon]||''}</svg>
+          <span>${l}</span>
+        </button>`).join('')}
+    </nav>
     ${S.toast?`<div class="toast" role="alert">${esc(S.toast)}</div>`:''}
     ${renderAiModal()}
   </div>`;
@@ -156,14 +182,14 @@ function renderModal() {
 // ═══ Login Modal ═══
 function renderLoginModal() {
   return `<div class="modal-overlay" data-action="closeModal">
-    <div class="modal" data-stop-propagation>
+    <div class="modal" data-stop-propagation role="dialog" aria-modal="true" aria-labelledby="loginTitle">
       <div class="modal-header">
         <div></div>
-        <button class="modal-close" data-action="closeModal">×</button>
+        <button class="modal-close" data-action="closeModal" aria-label="关闭登录窗口">×</button>
       </div>
       <div class="modal-body">
         <img src="/logo.svg" class="login-logo" alt="StructMind"/>
-        <h3 style="text-align:center;margin:0">欢迎来到 StructMind</h3>
+        <h3 id="loginTitle" style="text-align:center;margin:0">欢迎来到 StructMind</h3>
         <p style="text-align:center;color:var(--muted);font-size:0.9rem">数据结构 AI 智练中心</p>
         <div class="login-tabs">
           <button class="login-tab active" data-login-tab="login">登录</button>
@@ -175,7 +201,7 @@ function renderLoginModal() {
           <div id="registerFields" style="display:none">
             <div class="form-group"><label class="form-label">姓名</label><input class="form-input" id="regName" placeholder="请输入真实姓名"/></div>
             <div class="form-group"><label class="form-label">手机号</label><input class="form-input" id="regPhone" type="tel" placeholder="请输入手机号码" maxlength="11"/></div>
-            <div class="card" style="background:var(--info-bg);border-color:#b8ddd4"><small style="color:var(--sm-primary)">📋 注册后需等待管理员审批通过方可登录使用</small></div>
+            <div class="inline-notice"><small>注册后需等待管理员审批通过方可登录使用。</small></div>
           </div>
           <div id="loginError" style="display:none;background:var(--danger-bg);border:1px solid #fecaca;border-radius:10px;padding:10px 14px;margin-top:8px;color:var(--danger);font-size:0.88rem"></div>
           <div id="loginSuccess" style="display:none;background:var(--success-bg);border:1px solid #bbf7d0;border-radius:10px;padding:10px 14px;margin-top:8px;color:var(--success);font-size:0.88rem"></div>
@@ -191,10 +217,10 @@ function renderAiModal() {
   const m = S.aiModal; if (!m?.open) return '';
   const q = m.question; const showReply = m.loading || m.reply;
   return `<div class="modal-overlay" data-action="closeAiModal">
-    <div class="modal ai-modal" data-stop-propagation>
+    <div class="modal ai-modal" data-stop-propagation role="dialog" aria-modal="true" aria-labelledby="aiModalTitle">
       <div class="modal-header">
-        <div><h3>题目 AI 辅助</h3><p style="color:var(--muted);font-size:0.85rem">${esc(q.chapter)} · ${esc(q.qtype)} · #${esc(q.source_order||q.id)}</p></div>
-        <button class="modal-close" data-action="closeAiModal">×</button>
+        <div><h3 id="aiModalTitle">题目 AI 辅助</h3><p style="color:var(--muted);font-size:0.85rem">${esc(q.chapter)} · ${esc(q.qtype)} · #${esc(q.source_order||q.id)}</p></div>
+        <button class="modal-close" data-action="closeAiModal" aria-label="关闭 AI 辅助窗口">×</button>
       </div>
       <div class="modal-body">
         <div class="card" style="background:var(--bg)">
@@ -206,9 +232,9 @@ function renderAiModal() {
           <div class="form-group"><label class="form-label">追问</label><input class="form-input" id="aiModalMsg" placeholder="例如：为什么不是B？"/></div>
         </div>
         <div class="action-row" style="display:flex;gap:8px">
-          <button class="btn btn-primary" data-ai-action="explain" ${anyAIConfigured()&&!m.loading?'':'disabled'}>🤖 ${m.loading&&m.mode==='explain'?'讲解中...':'讲解这题'}</button>
-          <button class="btn btn-soft" data-ai-action="check" ${anyAIConfigured()&&!m.loading?'':'disabled'}>🔍 检查题目</button>
-          <button class="btn btn-ghost" data-ai-action="ask" ${anyAIConfigured()&&!m.loading?'':'disabled'}>💬 追问</button>
+          <button class="btn btn-primary" data-ai-action="explain" ${anyAIConfigured()&&!m.loading?'':'disabled'}>${m.loading&&m.mode==='explain'?'讲解中...':'讲解这题'}</button>
+          <button class="btn btn-soft" data-ai-action="check" ${anyAIConfigured()&&!m.loading?'':'disabled'}>检查题目</button>
+          <button class="btn btn-ghost" data-ai-action="ask" ${anyAIConfigured()&&!m.loading?'':'disabled'}>继续追问</button>
         </div>
         ${anyAIConfigured()?'':'<div class="empty">请先到 AI 配置页填写 API Key。</div>'}
         ${m.error?`<div class="result wrong"><strong>AI 请求失败</strong><div>${renderRich(m.error)}</div></div>`:''}
@@ -220,12 +246,12 @@ function renderAiModal() {
 
 // ═══ Tabs ═══
 function navItems() {
-  const items = [['dashboard','学习仪表盘','home'],['practice','题库练习','play'],['assignment','作业题库','stack'],['ai','AI 导师','bot'],['discussion','讨论题','message'],['wrong','错题本','book'],['settings','AI 配置','settings'],['audit','导入审计','shield']];
+  const items = [['dashboard','学习台','home'],['practice','题库','play'],['assignment','作业','stack'],['ai','AI 导师','bot'],['wrong','复习','book'],['discussion','讨论题','message'],['audit','导入审计','shield'],['settings','AI 配置','settings']];
   return items;
 }
 
 function pageTitle() {
-  const m = {dashboard:[`${APP.name} 仪表盘`,'学习进度、用户画像与个性化推荐'],practice:['题库练习','顺序及随机模式的客观题练习'],assignment:['作业题库','AI参考批改与Word答案对照'],ai:['AI 导师','苏格拉底式引导答疑'],discussion:['讨论题','AI参考批改与要点反馈'],wrong:['错题本','回顾答错的题目'],settings:['AI 配置','设置API Key和模型'],audit:['导入审计','题库导入问题处理记录'],admin:['管理审批','审批新用户注册申请']};
+  const m = {dashboard:['学习台','从下一项任务开始，保持稳定练习'],practice:['正式题库','按原题顺序、随机或薄弱项开始练习'],assignment:['课程作业','对照 Word 作业答案，使用 AI 参考批改'],ai:['AI 导师','通过解释、追问和提示建立理解'],discussion:['讨论题','梳理思路，获取 AI 参考反馈'],wrong:['复习','从最近错题和薄弱知识点重新开始'],settings:['AI 配置','管理模型与运行时密钥'],audit:['导入审计','核对题库来源、修复记录和答案处理'],admin:['管理审批','审核注册申请与用户状态']};
   const t = m[S.tab]||[S.tab,''];
   return {title:t[0],subtitle:t[1]};
 }
@@ -242,32 +268,52 @@ function renderDashboard() {
   const acc = p.attempts ? Math.round(p.correct/p.attempts*100) : 0;
   const integ = S.stats.integrity||{};
   const intOk = Object.values(integ).filter(v=>v===false).length===0 && !(integ.missing_answer_ids||[]).length;
-  return `<div class="grid" style="gap:16px">
-    ${!isLoggedIn()?`<div class="card card-glass" style="text-align:center;padding:28px">
-      <img src="/logo.svg" class="login-logo" style="margin-bottom:12px" alt="StructMind"/>
-      <h3 style="margin:0 0 4px">欢迎使用 StructMind</h3>
-      <p style="color:var(--muted);margin:0 0 16px">登录后解锁个性化学习推荐、AI导师答疑、用户画像等全部功能</p>
-      <button class="btn btn-primary" data-action="showLogin">立即登录</button>
-    </div>`:''}
-    ${S.profile?`<div class="card" style="border-left:4px solid var(--sm-primary)">
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
-        <div><strong style="font-size:1.1rem">📊 ${esc(S.user.name)} 的学习画像</strong>
-        <p style="color:var(--muted);margin:4px 0 0">已练习 ${S.profile.total_attempts||0} 题 · 正确率 ${profileAccuracy()}%</p></div>
-        <div class="weak-tags">${(S.profile.weak_concepts||[]).map(c=>`<span class="weak-tag">🔍 ${esc(c)}</span>`).join('')}${(S.profile.strong_concepts||[]).slice(0,3).map(c=>`<span class="strong-tag">✅ ${esc(c)}</span>`).join('')}</div>
+  const attempts = isLoggedIn() ? (S.profile?.total_attempts||0) : 0;
+  const weak = (S.profile?.weak_concepts||[]).slice(0,3);
+  const nextTitle = weak.length ? `复习 ${weak[0]}` : attempts ? '继续正式题库练习' : '完成第一组正式题库练习';
+  const nextReason = weak.length ? `最近记录显示 ${weak[0]} 需要加强，先练 10 题巩固概念。` : '从正式题库开始，系统会根据作答生成你的学习建议。';
+  return `<div class="learning-home">
+    <section class="next-session" aria-labelledby="next-session-title">
+      <div class="next-session-copy">
+        <span class="source-badge source-official">正式题库</span>
+        <h3 id="next-session-title">${esc(nextTitle)}</h3>
+        <p>${esc(nextReason)}</p>
+        <div class="session-facts"><span>10 题</span><span>约 12 分钟</span><span>${attempts?`累计 ${attempts} 题`:'首次练习'}</span></div>
       </div>
-      <div style="margin-top:12px"><button class="btn btn-primary btn-sm" data-action="recommendPractice">🎯 智能推荐练习</button></div>
-    </div>`:''}
-    <div class="grid grid-2">
-      <div class="card"><div class="grid grid-4">${metric('客观题',c.objective,'顺序/随机练习')}${metric('作业题',a?.counts?.questions||0,'Word答案+AI参考')}${metric('讨论题',c.discussion,'AI参考批改')}${metric('题库完整性',intOk?'通过':'需复核',intOk?'全部校验通过':'查看审计')}</div></div>
-      <div class="card">${renderProfileRadar()}</div>
+      <div class="next-session-action">
+        ${isLoggedIn()
+          ? `<button class="btn btn-primary" data-action="${weak.length?'recommendPractice':''}" ${weak.length?'':'data-tab="practice"'}>开始这组练习</button>`
+          : `<button class="btn btn-primary" data-action="showLogin">登录后开始</button>`}
+        <button class="text-button" data-tab="practice">自己选择题目</button>
+      </div>
+    </section>
+
+    <div class="home-columns">
+      <section class="study-agenda" aria-labelledby="agenda-title">
+        <div class="section-heading"><div><h3 id="agenda-title">今日计划</h3><p>保持一段完整、可完成的学习节奏</p></div><span class="progress-label">${attempts?'进行中':'未开始'}</span></div>
+        <div class="agenda-list">
+          <button class="agenda-row" data-tab="practice"><span class="agenda-index">1</span><span><strong>正式题库练习</strong><small>完成 10 道客观题并查看解析</small></span><span class="agenda-meta">12 分钟</span></button>
+          <button class="agenda-row" data-tab="wrong"><span class="agenda-index">2</span><span><strong>复习最近错题</strong><small>${S.wrongItems.length?`${S.wrongItems.length} 道错题等待重做`:'答错的题目会自动加入复习'}</small></span><span class="agenda-meta">8 分钟</span></button>
+          <button class="agenda-row" data-tab="ai"><span class="agenda-index">3</span><span><strong>向 AI 导师复述概念</strong><small>用自己的话解释一个薄弱知识点</small></span><span class="agenda-meta">5 分钟</span></button>
+        </div>
+      </section>
+
+      <aside class="progress-summary" aria-labelledby="progress-title">
+        <div class="section-heading"><div><h3 id="progress-title">学习进展</h3><p>${attempts?'根据已完成练习更新':'完成练习后生成画像'}</p></div></div>
+        ${S.profile?`<div class="progress-primary"><strong>${profileAccuracy()}%</strong><span>累计正确率</span></div>
+          <dl class="progress-details"><div><dt>已练习</dt><dd>${S.profile.total_attempts||0} 题</dd></div><div><dt>连续学习</dt><dd>${S.profile.practice_streak||0} 天</dd></div></dl>
+          <div class="concept-summary"><span>建议优先</span><div>${weak.length?weak.map(x=>`<button data-action="recommendPractice">${esc(x)}</button>`).join(''):'<small>继续练习以识别薄弱项</small>'}</div></div>`
+          : `<div class="progress-empty"><strong>从一次练习开始</strong><p>提交答案后，这里会显示正确率、薄弱知识点和下一步建议。</p><button class="btn btn-quiet" data-tab="practice">选择练习</button></div>`}
+      </aside>
     </div>
-    <div class="grid grid-3">${Object.entries(S.stats.chapters||{}).map(([ch,n])=>`<div class="metric"><span>${esc(ch)}</span><strong>${n}</strong><span>道题</span></div>`).join('')}</div>
-    <div class="action-row" style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-primary" data-tab="practice">▶ 开始练习</button>
-      <button class="btn btn-soft" data-tab="ai">🤖 AI 导师答疑</button>
-      <button class="btn btn-soft" data-tab="wrong">📖 错题本</button>
-      <button class="btn btn-ghost" data-tab="audit">🔍 查看审计</button>
-    </div>
+
+    <section class="trust-strip" aria-label="题库可信度">
+      <div><span>正式客观题</span><strong>${c.objective}</strong></div>
+      <div><span>Word 作业题</span><strong>${a?.counts?.questions||0}</strong></div>
+      <div><span>讨论题</span><strong>${c.discussion}</strong></div>
+      <div><span>导入校验</span><strong>${intOk?'已通过':'需复核'}</strong></div>
+      <button class="text-button" data-tab="audit">查看导入审计</button>
+    </section>
   </div>`;
 }
 
@@ -297,37 +343,40 @@ function renderPractice() {
   const q = S.session.questions[S.idx]; if (!q) return '<div class="panel"><div class="panel-inner"><div class="empty">没有符合条件的题目</div><button class="btn btn-primary" style="margin-top:12px" data-reset-session>重新选择</button></div></div>';
   const prog = Math.round((S.idx+1)/S.session.questions.length*100);
   const mn = {random:'随机练习',sequence:'顺序练习',wrong:'错题重做'}[S.session.mode]||S.session.mode;
-  return `<div class="workspace-grid grid">
-    <div class="panel question-card"><div class="panel-inner">${renderQuestion(q,'bank')}</div></div>
-    <aside class="panel"><div class="panel-inner side-list">
-      ${sideRow('模式',mn)}${sideRow('进度',`${S.idx+1}/${S.session.questions.length}`)}
-      <div class="progress"><div class="progress-bar" style="width:${prog}%"></div></div>
-      ${sideRow('抽题数',S.session.count)}${sideRow('可用',S.session.total_available)}
-      <div class="action-row" style="display:flex;gap:8px">
+  return `<div class="question-workspace">
+    <article class="question-stage">${renderQuestion(q,'bank')}</article>
+    <aside class="question-context" aria-label="本组练习信息">
+      <div class="context-head"><span class="source-badge source-official">正式题库</span><strong>${esc(mn)}</strong></div>
+      <div class="context-progress"><span>${S.idx+1} / ${S.session.questions.length}</span><small>本组进度</small></div>
+      <div class="progress" aria-label="完成 ${prog}%"><div class="progress-bar" style="width:${prog}%"></div></div>
+      <dl class="context-details"><div><dt>本组题量</dt><dd>${S.session.count}</dd></div><div><dt>筛选可用</dt><dd>${S.session.total_available}</dd></div></dl>
+      <div class="context-actions">
         <button class="btn btn-ghost btn-sm" data-prev-question ${S.idx===0?'disabled':''}>上一题</button>
-        <button class="btn btn-soft btn-sm" data-next-question ${S.idx>=S.session.questions.length-1?'disabled':''}>下一题 →</button>
+        <button class="btn btn-quiet btn-sm" data-next-question ${S.idx>=S.session.questions.length-1?'disabled':''}>下一题</button>
         <button class="btn btn-danger btn-sm" data-reset-session>结束本组</button>
       </div>
-    </div></aside>
+    </aside>
   </div>`;
 }
 
 function renderPracticeSetup() {
-  return `<div class="panel"><div class="panel-inner grid"><h3 style="margin:0">创建练习</h3>
-    <div>
-      <div class="form-label" style="margin-bottom:6px">题型</div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap">${['单选题','多选题','填空题','判断题'].map(t=>`<label class="tag" style="cursor:pointer;padding:6px 12px"><input type="checkbox" name="pType" value="${t}" checked style="accent-color:var(--sm-primary)"/> ${t}</label>`).join('')}</div>
+  const available = S.stats.counts?.objective||0;
+  return `<section class="practice-builder" aria-labelledby="practice-builder-title">
+    <div class="builder-heading"><span class="source-badge source-official">正式题库 · ${available} 题</span><h3 id="practice-builder-title">创建一组练习</h3><p>选择范围后开始。顺序练习完全遵循原题顺序，随机和推荐也只使用正式题库。</p></div>
+    <div class="builder-form">
+      <fieldset class="choice-fieldset"><legend>题型</legend><div class="filter-choices">${['单选题','多选题','填空题','判断题'].map(t=>`<label class="filter-choice"><input type="checkbox" name="pType" value="${t}" checked/><span>${t}</span></label>`).join('')}</div></fieldset>
+      <div class="builder-fields">
+        <div class="form-group"><label class="form-label" for="pChapter">章节范围</label><select class="form-select" id="pChapter"><option value="">全部章节</option>${Object.keys(S.stats.chapters).map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select></div>
+        <div class="form-group"><label class="form-label" for="pCount">练习题量</label><input class="form-input" id="pCount" type="number" min="1" max="${available}" placeholder="留空时使用全部题目"/></div>
+      </div>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-      <div class="form-group"><label class="form-label">章节</label><select class="form-select" id="pChapter"><option value="">全部章节</option>${Object.keys(S.stats.chapters).map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select></div>
-      <div class="form-group"><label class="form-label">题量</label><input class="form-input" id="pCount" type="number" min="1" placeholder="留空=全部"/></div>
+    <div class="builder-summary"><div><strong>${available}</strong><span>道正式客观题可筛选</span></div><p>标准答案来自原始题库，AI 仅用于辅助讲解。</p></div>
+    <div class="builder-actions">
+      <button class="btn btn-primary" data-start-mode="sequence">开始顺序练习</button>
+      <button class="btn btn-quiet" data-start-mode="random">随机出题</button>
+      <button class="text-button" data-action="recommendPractice">按薄弱项推荐</button>
     </div>
-    <div class="action-row" style="display:flex;gap:8px">
-      <button class="btn btn-primary" data-start-mode="sequence">▶ 顺序练习</button>
-      <button class="btn btn-soft" data-start-mode="random">🎲 随机出题</button>
-      <button class="btn btn-ghost" data-action="recommendPractice">🎯 智能推荐</button>
-    </div>
-  </div></div>`;
+  </section>`;
 }
 
 // ═══ Assignment ═══
@@ -336,22 +385,23 @@ function renderAssignment() {
   if (!S.assignmentSession) {
     return `<div class="workspace-grid grid">
       <div class="panel"><div class="panel-inner grid"><h3 style="margin:0">创建作业练习</h3>
+        <span class="source-badge source-word">Word 作业题库</span>
         <div>
           <div class="form-label" style="margin-bottom:6px">题型</div>
-          <div style="display:flex;gap:6px">${['简答题','填空题'].map(t=>`<label class="tag" style="cursor:pointer;padding:6px 12px"><input type="checkbox" name="aType" value="${t}" checked style="accent-color:var(--sm-primary)"/> ${t}</label>`).join('')}</div>
+          <div style="display:flex;gap:6px">${['简答题','填空题'].map(t=>`<label class="tag" style="cursor:pointer;padding:6px 12px"><input type="checkbox" name="aType" value="${t}" checked style="accent-color:var(--primary)"/> ${t}</label>`).join('')}</div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <div class="form-group"><label class="form-label">分组</label><select class="form-select" id="aChapter"><option value="">全部</option>${Object.keys(bank.chapters||{}).map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select></div>
           <div class="form-group"><label class="form-label">题量</label><input class="form-input" id="aCount" type="number" min="1" placeholder="留空=全部"/></div>
         </div>
         <div class="action-row" style="display:flex;gap:8px">
-          <button class="btn btn-primary" data-start-assignment="sequence">▶ 顺序练习</button>
-          <button class="btn btn-soft" data-start-assignment="random">🎲 随机出题</button>
+          <button class="btn btn-primary" data-start-assignment="sequence">顺序练习</button>
+          <button class="btn btn-soft" data-start-assignment="random">随机出题</button>
         </div>
       </div></div>
       <aside class="panel"><div class="panel-inner side-list">
         ${sideRow('作业题',bank.counts?.questions||0)}${sideRow('Word答案',bank.counts?.word_answers||0)}${sideRow('AI参考',bank.counts?.ai_reference_answers||0)}
-        <span style="color:var(--muted);line-height:1.65">简答题使用AI参考批改，AI参考答案不会计作官方答案。</span>
+        <span style="color:var(--muted);line-height:1.65">简答题可使用 <span class="source-badge source-ai">AI 参考</span> 批改。AI 内容不会标记为 Word 来源答案。</span>
       </div></aside>
     </div>`;
   }
@@ -374,42 +424,32 @@ function renderAssignment() {
 
 // ═══ AI Tutor ═══
 function renderAI() {
-  return `<div class="workspace-grid grid">
-    <div class="panel"><div class="panel-inner">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
-        <div><h3 style="margin:0">🦉 AI 导师 · 苏格拉底式答疑</h3><p style="color:var(--muted);margin:4px 0 0;font-size:0.85rem">我不直接给你答案，但我会提出正确的问题，帮你真正理解数据结构</p></div>
-        <button class="btn btn-ghost btn-sm" data-action="resetTutor">🔄 新对话</button>
+  const examples = ['二叉树的三种遍历分别解决什么问题？','哈希冲突的处理方法该怎样比较？','快速排序最坏情况为什么是 O(n²)？','怎样判断一个有向图是否存在环？'];
+  return `<div class="tutor-workspace">
+    <section class="tutor-main" aria-label="AI 导师对话">
+      <div class="tutor-toolbar"><div><span class="source-badge source-ai">AI 导师</span><strong>苏格拉底式引导</strong></div><button class="text-button" data-action="resetTutor">开始新对话</button></div>
+      <div class="tutor-thread" id="tutorChat" aria-live="polite">
+        ${S.tutorMessages.length===0?`<div class="tutor-empty"><div class="tutor-mark" aria-hidden="true">S</div><h3>你现在想弄懂什么？</h3><p>描述概念、题目或你的思路。我会先确认你卡住的位置，再给出解释或下一步提示。</p><div class="example-list">${examples.map(q=>`<button data-tutor-example="${escAttr(q)}">${q}<span aria-hidden="true">↗</span></button>`).join('')}</div></div>`:''}
+        ${S.tutorMessages.map(m=>`<article class="tutor-message ${m.role}"><div class="message-label">${m.role==='user'?'你':'AI 导师'}</div><div class="message-content">${renderRich(m.content)}</div></article>`).join('')}
+        ${S.tutorLoading?`<article class="tutor-message assistant streaming"><div class="message-label">AI 导师</div><div class="message-content">${S.tutorStreamContent?renderRich(S.tutorStreamContent):'<span class="stream-status">正在梳理你的问题</span>'}<span class="stream-caret" aria-hidden="true"></span></div></article>`:''}
       </div>
-      <div class="chat-area" id="tutorChat" style="max-height:380px;min-height:200px">
-        ${S.tutorMessages.length===0?`<div class="empty">
-          <span class="empty-icon">🦉</span><p class="empty-title">我是你的苏格拉底式AI导师</p>
-          <p class="empty-desc">我不会直接给你答案，而是通过提问引导你自己发现答案。</p>
-          <div style="margin-top:12px;text-align:left">
-            <p style="color:var(--muted);font-size:0.85rem;margin-bottom:8px">试试这些问题：</p>
-            ${['🌳 二叉树的三种遍历有什么区别？','🔑 哈希表冲突解决有哪些方法？','📊 快速排序和归并排序的复杂度分析','📐 如何判断一个图是否有环？'].map(q=>`<button class="btn btn-ghost btn-sm" style="margin:4px;text-align:left" data-tutor-example="${escAttr(q)}">${q}</button>`).join('')}
-          </div>
-        </div>`:''}
-        ${S.tutorMessages.map(m=>`<div class="chat-msg ${m.role}"><div class="chat-avatar">${m.role==='user'?'👤':'🦉'}</div><div class="chat-bubble">${renderRich(m.content)}</div></div>`).join('')}
-        ${S.tutorLoading?`<div class="chat-msg assistant"><div class="chat-avatar">🦉</div><div class="chat-bubble"><span class="skeleton" style="display:inline-block;width:60%;height:14px"></span></div></div>`:''}
+      <div class="tutor-composer-wrap">
+        <div class="tutor-intents" aria-label="学习意图">${[
+          ['解释概念','请用直观例子解释：'],['检查思路','请检查我的思路并指出关键问题：'],['逐步提示','请不要直接给答案，逐步提示我：'],['生成变式题','请根据这个知识点生成一道变式题：']
+        ].map(([label,prompt])=>`<button class="tutor-intent" data-tutor-fill="${escAttr(prompt)}">${label}</button>`).join('')}</div>
+        <div class="tutor-composer ${!anyAIConfigured()?'disabled':''}">
+          <textarea id="tutorInput" rows="1" placeholder="写下问题、题目或你的思考" ${!anyAIConfigured()?'disabled':''}></textarea>
+          <div class="composer-footer"><span>${anyAIConfigured()?'Enter 发送，Shift + Enter 换行':'配置模型后可开始对话'}</span><button class="send-button" data-action="sendTutor" ${S.tutorLoading||!anyAIConfigured()?'disabled':''} aria-label="发送问题"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5"/><path d="m6 11 6-6 6 6"/></svg></button></div>
+        </div>
+        ${!anyAIConfigured()?`<div class="inline-notice"><span>AI 导师尚未配置。</span><button class="text-button" data-tab="settings">前往配置</button></div>`:''}
       </div>
-      <div class="chat-input-row">
-        <input class="chat-input" id="tutorInput" placeholder="输入你的问题或思考..."/>
-        <button class="btn btn-primary" data-action="sendTutor" ${S.tutorLoading||!anyAIConfigured()?'disabled':''}>发送</button>
-      </div>
-      ${anyAIConfigured()?`<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">${['请帮我理解二叉树的遍历','栈和队列有什么区别','什么是哈夫曼树'].map(q=>`<button class="btn btn-ghost btn-sm" data-tutor-example="${escAttr(q)}">${q}</button>`).join('')}</div>`:''}
-      ${S.tutorConvId?`<div style="margin-top:8px;color:var(--muted);font-size:0.78rem">对话 #${S.tutorConvId}</div>`:''}
-    </div></div>
-    <aside class="panel"><div class="panel-inner side-list">
-      <strong>🦉 苏格拉底式导师</strong>
-      <div class="card" style="background:var(--info-bg);border-color:#b8ddd4"><p style="margin:0;font-size:0.85rem;color:var(--sm-primary)">我不会直接给你答案。我会通过提问引导你思考关键概念，帮你建立自己的理解。</p></div>
-      <div style="display:grid;gap:8px">
-        ${['数据结构概念理解','算法步骤推导','复杂度的直观理解','解题思路引导','概念辨析与对比'].map(t=>`<span class="tag tag-info">${t}</span>`).join('')}
-      </div>
-      <div style="margin-top:8px">
-        <button class="btn btn-primary btn-sm" style="width:100%" data-action="generateAI">🤖 生成AI变式题</button>
-        <p style="color:var(--muted);font-size:0.82rem;margin-top:8px">也可以生成AI题目来检验学习效果</p>
-      </div>
-    </div></aside>
+    </section>
+    <aside class="tutor-context">
+      <div class="context-head"><span>当前方式</span><strong>引导式学习</strong></div>
+      <p>导师会优先追问你的理解，再按需要解释概念、拆解步骤或生成变式题。</p>
+      <dl><div><dt>对话</dt><dd>${S.tutorConvId?`#${S.tutorConvId}`:'新对话'}</dd></div><div><dt>模型</dt><dd>${anyAIConfigured()?esc(S.config.default_model):'未配置'}</dd></div><div><dt>内容来源</dt><dd>AI 参考</dd></div></dl>
+      <div class="context-note"><strong>答案边界</strong><span>导师回复用于理解与复习，不替代正式题库的标准答案。</span></div>
+    </aside>
   </div>`;
 }
 
@@ -417,7 +457,7 @@ function renderAI() {
 function renderAdmin() {
   if (!isAdmin()) return '<div class="empty"><p>仅管理员可访问</p></div>';
   return `<div class="panel"><div class="panel-inner" id="adminPanel">
-    <h3 style="margin:0 0 8px">🔐 管理审批</h3>
+    <h3 style="margin:0 0 8px">管理审批</h3>
     <p style="color:var(--muted);margin:0 0 16px">审批新用户注册申请</p>
     <div id="adminContent"><div class="skeleton skeleton-text" style="width:80%"></div><div class="skeleton skeleton-text" style="width:60%"></div></div>
   </div></div>`;
@@ -429,7 +469,7 @@ async function loadAdminPanel() {
     const pu = pending.users||[], au = all.users||[];
     document.querySelector('#adminContent').innerHTML = `
       <div class="grid grid-2" style="margin-bottom:16px"><div class="metric"><span>待审批</span><strong>${pu.length}</strong></div><div class="metric"><span>已通过</span><strong>${au.filter(u=>u.status==='approved').length}</strong></div></div>
-      ${pu.length===0?'<div class="empty"><p>✅ 没有待审批的申请</p></div>':`<div class="grid" style="gap:8px">${pu.map(u=>`<div class="card" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+      ${pu.length===0?'<div class="empty"><p>没有待审批的申请</p></div>':`<div class="grid" style="gap:8px">${pu.map(u=>`<div class="card" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
         <div style="display:flex;align-items:center;gap:10px"><div class="user-avatar">${esc(u.name[0])}</div><div><strong>${esc(u.name)}</strong><div style="color:var(--muted);font-size:0.85rem">@${esc(u.account)} · ${esc(u.phone)}</div></div></div>
         <div style="display:flex;gap:6px"><button class="btn btn-primary btn-sm" data-approve-user="${escAttr(String(u.id))}" data-approve-val="1">通过</button><button class="btn btn-danger btn-sm" data-approve-user="${escAttr(String(u.id))}" data-approve-val="0">拒绝</button></div>
       </div>`).join('')}</div>`}
@@ -453,10 +493,10 @@ function renderDiscussion() {
       </div>
       ${sel?`<div class="stem">${renderRich(sel.prompt)}</div>`:'<div class="empty">没有讨论题</div>'}
       <div class="form-group"><label class="form-label">你的回答</label><textarea class="form-textarea" id="discAnswer" placeholder="写出你的理解、推理过程或关键词"></textarea></div>
-      <button class="btn btn-primary" data-grade-discussion ${anyAIConfigured()&&!S.loading?'':'disabled'}>💬 ${S.loading?'批改中...':'提交参考批改'}</button>
+      <button class="btn btn-primary" data-grade-discussion ${anyAIConfigured()&&!S.loading?'':'disabled'}>${S.loading?'批改中':'获取 AI 参考反馈'}</button>
       ${S.discussionResult?renderDiscResult(S.discussionResult):''}
     </div></div>
-    <aside class="panel"><div class="panel-inner side-list"><strong>讨论题说明</strong><span style="color:var(--muted);line-height:1.65">讨论题无Word标准答案，AI反馈只作为复习参考，不计入正确率。</span></div></aside>
+    <aside class="panel"><div class="panel-inner side-list"><span class="source-badge source-ai">AI 参考</span><strong>讨论题反馈</strong><span style="color:var(--muted);line-height:1.65">讨论题没有 Word 标准答案。AI 反馈只用于复习，不计入正式题库正确率。</span></div></aside>
   </div>`;
 }
 
@@ -465,10 +505,10 @@ function renderWrong() {
   const ids = S.wrongItems.map(it=>it.question.id);
   return `<div class="panel"><div class="panel-inner grid">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
-      <div><h3 style="margin:0">错题预览</h3><p style="color:var(--muted);margin:4px 0 0">最近答错的题目，按去重排列</p></div>
-      <div style="display:flex;gap:8px"><button class="btn btn-soft btn-sm" data-load-wrong>🔄 刷新</button><button class="btn btn-primary btn-sm" data-redo-all ${ids.length?'':'disabled'}>▶ 重做全部</button></div>
+      <div><h3 style="margin:0">最近错题</h3><p style="color:var(--muted);margin:4px 0 0">按题目去重，重做后重新判断掌握情况</p></div>
+      <div style="display:flex;gap:8px"><button class="btn btn-quiet btn-sm" data-load-wrong>刷新列表</button><button class="btn btn-primary btn-sm" data-redo-all ${ids.length?'':'disabled'}>开始本组复习</button></div>
     </div>
-    ${S.wrongItems.length?S.wrongItems.map(it=>renderWrongItem(it)).join(''):'<div class="empty"><span class="empty-icon">🎉</span><p>还没有错题记录</p></div>'}
+    ${S.wrongItems.length?S.wrongItems.map(it=>renderWrongItem(it)).join(''):'<div class="empty"><p class="empty-title">还没有错题记录</p><p class="empty-desc">完成正式题库练习后，答错的题目会自动进入这里。</p></div>'}
   </div></div>`;
 }
 
@@ -481,7 +521,7 @@ function renderWrongItem(it) {
     ${q.options?.length?`<div style="margin:8px 0;display:grid;gap:4px;padding:10px;border-radius:8px;background:var(--bg)">${q.options.map(o=>`<span><strong>${esc(o.key)}.</strong> ${renderInline(o.text)} ${o.ai_supplemented?'<span class="option-note">AI补全</span>':''}</span>`).join('')}</div>`:''}
     <div class="side-row"><span>你的答案</span><strong style="color:var(--danger)">${esc(Array.isArray(it.user_answer)?it.user_answer.join(''):it.user_answer)}</strong></div>
     <div class="side-row"><span>标准答案</span><strong style="color:var(--success)">${esc(q.answer)}</strong></div>
-    <div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-primary btn-sm" data-redo-question="${q.id}">▶ 重做本题</button><button class="btn btn-ghost btn-sm" data-open-question-ai="${q.id}">🤖 AI解析</button></div>
+    <div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-primary btn-sm" data-redo-question="${q.id}">重做本题</button><button class="btn btn-ghost btn-sm" data-open-question-ai="${q.id}">AI 解析</button></div>
   </div>`;
 }
 
@@ -497,7 +537,7 @@ function renderSettings() {
         <div class="form-group"><label class="form-label">默认模型</label><select class="form-select" id="sModel">${modelOpts()}</select></div>
       </div>
       <div class="action-row" style="display:flex;gap:8px">
-        <button class="btn btn-primary" data-save-config>💾 保存配置</button>
+        <button class="btn btn-primary" data-save-config>保存配置</button>
         <button class="btn btn-danger btn-sm" data-clear-provider="zhipu" ${zp.api_key_source==='runtime'?'':'disabled'}>清除智谱</button>
         <button class="btn btn-danger btn-sm" data-clear-provider="deepseek" ${ds.api_key_source==='runtime'?'':'disabled'}>清除DeepSeek</button>
       </div>
@@ -512,7 +552,7 @@ function renderAudit() {
   const ex = S.stats.banks?.exam||S.stats, as = S.stats.banks?.assignment||{};
   const audit = [...(ex.audit||[]).map(a=>({...a,bank_label:'考试题库'})),...(as.audit||[]).map(a=>({...a,bank_label:'作业题库'}))];
   return `<div class="panel"><div class="panel-inner">
-    <h3 style="margin:0 0 12px">导入审计</h3>
+    <div class="section-heading"><div><h3>导入审计</h3><p>所有修复记录都保留原题号、来源和处理方式</p></div><span class="source-badge source-official">来源可追溯</span></div>
     <div class="table-wrap"><table><thead><tr><th>题库</th><th>题号</th><th>章节</th><th>题型</th><th>问题</th><th>处理</th></tr></thead><tbody>${audit.length?audit.map(a=>`<tr><td>${esc(a.bank_label)}</td><td>${esc(a.question_id||'')}</td><td>${esc(a.chapter||'')}</td><td>${esc(a.qtype||'')}</td><td>${esc(a.issue)}</td><td>${esc(a.handling)}</td></tr>`).join(''):'<tr><td colspan="6">未发现导入异常</td></tr>'}</tbody></table></div>
   </div></div>`;
 }
@@ -521,19 +561,20 @@ function renderAudit() {
 function renderQuestion(q, src, bankId=q.bank_id||'exam') {
   const rk = `${src}-${q.id}`, result = src==='assignment'? S.assignmentResults[rk] : S.results[rk];
   const canAI = ['bank','assignment'].includes(src) && Number.isFinite(Number(q.id));
-  return `<div class="question-head">${renderQuestionTags(q)}<div class="question-tools"><span class="tag">#${esc(q.source_order||q.id)}</span>${canAI?`<button class="btn btn-ghost btn-sm" data-open-question-ai="${q.id}" data-open-question-bank="${bankId}">🤖 AI解析</button>`:''}</div></div>
-    ${q.ai_completed?`<div style="padding:8px 12px;border-radius:8px;background:var(--info-bg);color:var(--sm-primary);margin-bottom:10px;font-size:0.85rem">${esc(q.completion_note||'本题显示文本已由AI补全表修复，标准答案不变')}</div>`:''}
+  const sourceClass = src==='bank'?'source-official':q.answer_source==='word_answer'?'source-word':'source-ai';
+  const sourceLabel = src==='bank'?'正式题库':q.answer_source==='word_answer'?'Word 作业答案':'AI 参考';
+  return `<div class="question-head"><div>${renderQuestionTags(q)}<span class="source-badge ${sourceClass}">${sourceLabel}</span></div><div class="question-tools"><span class="question-number">第 ${esc(q.source_order||q.id)} 题</span>${canAI?`<button class="btn btn-ghost btn-sm" data-open-question-ai="${q.id}" data-open-question-bank="${bankId}">AI 解析</button>`:''}</div></div>
+    ${q.ai_completed?`<div class="inline-notice">${esc(q.completion_note||'本题显示文本已由 AI 补全表修复，标准答案不变')}</div>`:''}
     <div class="stem">${renderRich(q.stem)}</div>
     ${(q.images||[]).map(s=>`<img src="${esc(s)}" style="max-width:min(100%,600px);border-radius:8px;border:1px solid var(--border);margin:10px 0" alt="配图"/>`).join('')}
     ${renderAnswerControl(q,src)}
-    ${src==='assignment'?renderAssignmentActions(q):`<div class="action-row" style="margin-top:12px"><button class="btn btn-primary" data-submit-${src}>✅ 提交答案</button></div>`}
+    ${src==='assignment'?renderAssignmentActions(q):`<div class="question-submit"><button class="btn btn-primary" data-submit-${src}>提交答案</button><span>提交后显示标准答案与解析</span></div>`}
     ${result?(src==='assignment'?renderAssignmentResult(result):renderResult(result)):''}`;
 }
 
 function renderQuestionTags(q) {
   return `<div class="question-meta">
-    <span class="tag">${esc(q.chapter||'AI出题')}</span><span class="tag">${esc(q.qtype)}</span>
-    ${q.answer_source?`<span class="tag ${q.answer_source==='ai_reference'?'tag-warning':'tag-success'}">${ansSrc(q.answer_source)}</span>`:''}
+    <span>${esc(q.chapter||'AI 出题')}</span><span>${esc(q.qtype)}</span>
     ${q.ai_completed?'<span class="tag tag-info">AI补全</span>':''}
     ${q.repaired?'<span class="tag tag-warning">已校验</span>':''}
   </div>`;
@@ -549,17 +590,17 @@ function renderAnswerControl(q, src) {
 
 function renderAssignmentActions(q) {
   if (q.qtype==='简答题') return `<div class="form-group" style="margin:8px 0"><label class="form-label">批改模型</label><select class="form-select" id="aModel">${modelOpts()}</select></div>
-    <div class="action-row" style="display:flex;gap:8px"><button class="btn btn-primary" data-grade-assignment ${anyAIConfigured()&&!S.loading?'':'disabled'}>💬 ${S.loading?'批改中...':'AI参考批改'}</button><button class="btn btn-ghost" data-show-assignment-answer="${q.id}">👁 查看参考答案</button></div>`;
-  return `<div class="action-row" style="display:flex;gap:8px"><button class="btn btn-primary" data-submit-assignment>✅ 提交答案</button><button class="btn btn-ghost" data-show-assignment-answer="${q.id}">👁 参考答案</button></div>`;
+    <div class="action-row"><button class="btn btn-primary" data-grade-assignment ${anyAIConfigured()&&!S.loading?'':'disabled'}>${S.loading?'批改中':'获取 AI 参考批改'}</button><button class="btn btn-ghost" data-show-assignment-answer="${q.id}">查看来源答案</button></div>`;
+  return `<div class="action-row"><button class="btn btn-primary" data-submit-assignment>提交答案</button><button class="btn btn-ghost" data-show-assignment-answer="${q.id}">查看来源答案</button></div>`;
 }
 
 function renderResult(r) {
-  return `<div class="result ${r.is_correct?'correct':'wrong'}"><div class="result-head"><span class="result-icon">${r.is_correct?'✅':'❌'}</span><strong>${r.is_correct?'回答正确！':'回答错误'}</strong></div>
-    <div class="answer-line"><span>标准答案</span>${renderRich(r.correct_answer)}</div>${r.analysis?`<div class="answer-line"><span>解析</span>${renderRich(r.analysis)}</div>`:''}</div>`;
+  return `<section class="result ${r.is_correct?'correct':'wrong'}" aria-label="答题结果"><div class="result-head"><span class="result-icon" aria-hidden="true">${r.is_correct?'✓':'×'}</span><div><strong>${r.is_correct?'回答正确':'回答错误'}</strong><span class="source-badge source-official">正式题库标准答案</span></div></div>
+    <div class="answer-line"><span>标准答案</span>${renderRich(r.correct_answer)}</div>${r.analysis?`<div class="answer-line"><span>解析</span>${renderRich(r.analysis)}</div>`:''}<div class="result-actions"><button class="btn btn-primary" data-next-question>继续下一题</button></div></section>`;
 }
 
 function renderAssignmentResult(r) {
-  if (r.kind==='answer') return `<div class="result"><strong>${ansSrc(r.answer_source)}</strong><div class="answer-line"><span>参考答案</span>${renderRich(r.answer||'暂无')}</div>${r.answer_source==='ai_reference'?'<div style="color:var(--warning);font-size:0.82rem;margin-top:4px">⚠ 此答案为AI参考，非Word官方答案</div>':''}</div>`;
+  if (r.kind==='answer') { const isWord=r.answer_source==='word_answer'; return `<div class="result"><span class="source-badge ${isWord?'source-word':'source-ai'}">${isWord?'Word 作业答案':'AI 参考'}</span><div class="answer-line"><span>参考答案</span>${renderRich(r.answer||'暂无')}</div>${!isWord?'<div class="inline-notice">此内容为 AI 参考，不是 Word 来源答案。</div>':''}</div>`; }
   if (r.feedback) { const fb = r.feedback||{}; return `<div class="result"><strong>${esc(fb.level||'参考反馈')} · ${fb.score??0}分</strong>
     ${fb.verdict?`<div class="answer-line"><span>结论</span>${renderRich(fb.verdict)}</div>`:''}
     ${fb.reference_answer?`<div class="answer-line"><span>参考答案</span>${renderRich(fb.reference_answer)}</div>`:''}
@@ -583,7 +624,7 @@ function renderAIGenerate() {
       <div class="form-group"><label class="form-label">模型</label><select class="form-select" id="aiGenModel">${modelOpts()}</select></div>
       <div class="form-group"><label class="form-label">题型</label><select class="form-select" id="aiGenType"><option>单选题</option><option>多选题</option><option>填空题</option><option>判断题</option></select></div>
     </div>
-    <button class="btn btn-primary" data-generate-ai ${anyAIConfigured()&&!S.loading?'':'disabled'}>🤖 ${S.loading?'生成中...':'生成AI变式题'}</button>
+    <button class="btn btn-primary" data-generate-ai ${anyAIConfigured()&&!S.loading?'':'disabled'}>${S.loading?'生成中...':'生成 AI 变式题'}</button>
     ${S.aiQuestion?`<div class="card" style="margin-top:12px;background:var(--bg)">${renderQuestion(S.aiQuestion,'ai')}</div>`:'<div class="empty" style="margin-top:12px">生成后在此答题，AI解析支持公式与代码渲染</div>'}
   </div>`;
 }
@@ -591,7 +632,7 @@ function renderAIGenerate() {
 // ═══ Helpers ═══
 function metric(l,v,n) { return `<div class="metric"><span>${esc(l)}</span><strong>${esc(v)}</strong><span>${esc(n)}</span></div>`; }
 function sideRow(l,v) { return `<div class="side-row"><span>${esc(l)}</span><strong>${esc(v)}</strong></div>`; }
-function ansSrc(s) { return s==='word_answer'?'Word答案':s==='ai_reference'?'AI参考':'无答案'; }
+function ansSrc(s) { return s==='word_answer'?'Word 作业答案':s==='ai_reference'?'AI 参考':'无来源答案'; }
 function modeTitle(m) { return {explain:'AI讲解',check:'题目检查',ask:'追问回答'}[m]||'AI辅助'; }
 function anyAIConfigured() { return (S.config.providers||[]).some(p=>p.ai_configured); }
 function providerStatus(id) { return (S.config.providers||[]).find(p=>p.id===id)||{}; }
@@ -626,7 +667,7 @@ function renderRich(v) {
       const h=cells.shift()||[], b=cells;
       blocks.push(`<div class="rich-table-wrap"><table class="rich-table"><thead><tr>${h.map(c=>`<th>${renderInline(c)}</th>`).join('')}</tr></thead><tbody>${b.map(r=>`<tr>${r.map(c=>`<td>${renderInline(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`); continue;
     }
-    if (/^\s*#{1,4}\s+/.test(l)){blocks.push(`<h4 style="color:var(--sm-primary-dark);margin:0">${renderInline(l.replace(/^\s*#{1,4}\s+/,''))}</h4>`);i++;continue;}
+    if (/^\s*#{1,4}\s+/.test(l)){blocks.push(`<h4 style="color:var(--primary-strong);margin:0">${renderInline(l.replace(/^\s*#{1,4}\s+/,''))}</h4>`);i++;continue;}
     if (/^\s*[-*]\s+/.test(l)){let items=[];while(i<lines.length&&/^\s*[-*]\s+/.test(lines[i])){items.push(lines[i].replace(/^\s*[-*]\s+/,''));i++;}blocks.push(`<ul style="padding-left:1.2rem;display:grid;gap:4px">${items.map(it=>`<li>${renderInline(it)}</li>`).join('')}</ul>`);continue;}
     let para=[]; while(i<lines.length&&lines[i].trim()&&!lines[i].trim().startsWith('```')&&!lines[i].includes('|')&&!/^\s*#{1,4}\s+/.test(lines[i])&&!/^\s*[-*]\s+/.test(lines[i])){para.push(lines[i]);i++;} blocks.push(`<p>${para.map(renderInline).join('<br>')}</p>`);
   }
@@ -659,14 +700,14 @@ async function startSession(mode) {
   const types = [...document.querySelectorAll('input[name="pType"]:checked')].map(c=>c.value);
   const ch = document.querySelector('#pChapter')?.value||'';
   const cnt = document.querySelector('#pCount')?.value||'';
-  S.session = await api('/api/session',{method:'POST',body:JSON.stringify({mode,types,chapters:ch?[ch]:[],count:cnt||'all'})});
+  S.session = await api('/api/session',{method:'POST',body:JSON.stringify({mode,types,chapters:ch?[ch]:[],count:cnt?Number(cnt):null})});
   S.idx=0; S.results={}; render();
 }
 async function startAssignmentSession(mode) {
   const types = [...document.querySelectorAll('input[name="aType"]:checked')].map(c=>c.value);
   const ch = document.querySelector('#aChapter')?.value||'';
   const cnt = document.querySelector('#aCount')?.value||'';
-  S.assignmentSession = await api('/api/session',{method:'POST',body:JSON.stringify({bank_id:'assignment',mode,types,chapters:ch?[ch]:[],count:cnt||'all'})});
+  S.assignmentSession = await api('/api/session',{method:'POST',body:JSON.stringify({bank_id:'assignment',mode,types,chapters:ch?[ch]:[],count:cnt?Number(cnt):null})});
   S.assignmentIdx=0; S.assignmentResults={}; render();
 }
 
@@ -676,7 +717,7 @@ async function recommendPractice() {
     const d = await api('/api/recommend/questions',{method:'POST',body:JSON.stringify({count:15})});
     if (!d.questions?.length) { toast('暂无推荐题目，请先练习一些题目'); return; }
     const ids = d.questions.map(q=>q.id);
-    S.session = await api('/api/session',{method:'POST',body:JSON.stringify({mode:'random',question_ids:ids,count:'all'})});
+    S.session = await api('/api/session',{method:'POST',body:JSON.stringify({mode:'random',question_ids:ids,count:null})});
     S.idx=0; S.results={}; S.tab='practice'; render();
   } catch(e) { toast(e.message); }
 }
@@ -746,27 +787,20 @@ function connectWsTutor() {
         const data = JSON.parse(event.data);
         if (data.type === 'delta') {
           S.tutorStreamContent = (S.tutorStreamContent||'') + (data.content||'');
-          // Update the last assistant bubble in-place without full re-render for performance
           const chatArea = document.querySelector('#tutorChat');
           if (chatArea) {
-            let lastBubble = chatArea.querySelector('.chat-msg.assistant:last-of-type .chat-bubble');
-            if (!lastBubble) {
-              // First delta: create a new assistant message
-              S.tutorMessages.push({role:'assistant',content:S.tutorStreamContent});
-              S.tutorLoading = false;
-              render();
-              return;
-            }
-            lastBubble.innerHTML = renderRich(S.tutorStreamContent);
+            const content = chatArea.querySelector('.tutor-message.streaming .message-content');
+            if (content) content.innerHTML = renderRich(S.tutorStreamContent) + '<span class="stream-caret" aria-hidden="true"></span>';
             chatArea.scrollTop = chatArea.scrollHeight;
           }
         } else if (data.type === 'done') {
           S.tutorConvId = data.conversation_id;
+          if (S.tutorStreamContent) S.tutorMessages.push({role:'assistant',content:S.tutorStreamContent});
           S.tutorLoading = false;
           S.tutorStreamContent = '';
-          updateWsIndicator();
+          render();
         } else if (data.type === 'error') {
-          S.tutorMessages.push({role:'assistant',content:data.error||'AI服务暂时不可用。'});
+          S.tutorMessages.push({role:'assistant',content:data.message||data.error||'AI服务暂时不可用。'});
           S.tutorLoading = false;
           S.tutorStreamContent = '';
           render();
@@ -777,12 +811,11 @@ function connectWsTutor() {
       S.wsConnected = false;
       updateWsIndicator();
       S.ws = null;
-      // Auto-reconnect after 5s
-      S.wsReconnectTimer = setTimeout(() => {
-        if (!S.ws || S.ws.readyState !== WebSocket.OPEN) {
-          connectWsTutor();
-        }
-      }, 5000);
+      if (S.token) {
+        S.wsReconnectTimer = setTimeout(() => {
+          if (S.token && (!S.ws || S.ws.readyState !== WebSocket.OPEN)) connectWsTutor();
+        }, 5000);
+      }
     };
     ws.onerror = () => {
       S.wsConnected = false;
@@ -810,8 +843,8 @@ function sendViaWebSocket(msg) {
 function updateWsIndicator() {
   const el = document.querySelector('#wsStatus');
   if (el) {
-    el.className = 'ai-status ' + (S.wsConnected ? 'online' : '');
-    el.innerHTML = `<span class="dot ${S.wsConnected ? '' : 'offline'}"></span>${S.wsConnected ? 'WS已连接' : 'WS未连接'}`;
+    el.className = `status-mark ${S.wsConnected?'ready':'muted'}`;
+    el.setAttribute('aria-label', S.wsConnected?'导师实时连接正常':'导师使用标准连接');
   }
 }
 
@@ -819,21 +852,47 @@ function updateWsIndicator() {
 async function sendTutorMsg() {
   const input = document.querySelector('#tutorInput'); if (!input) return;
   const msg = input.value.trim(); if (!msg||S.tutorLoading) return;
-  input.value = ''; S.tutorMessages.push({role:'user',content:msg}); S.tutorLoading=true; render();
+  input.value = ''; S.tutorMessages.push({role:'user',content:msg}); S.tutorLoading=true; S.tutorStreamContent=''; render();
 
   // Try WebSocket first for streaming
   if (S.wsConnected && sendViaWebSocket(msg)) {
-    // Response streams in via ws.onmessage above
     setTimeout(()=>{const c=document.querySelector('#tutorChat');if(c)c.scrollTop=c.scrollHeight;},100);
     return;
   }
 
-  // Fall back to REST API
+  // Try SSE streaming via streamApi
+  let streamContent = '';
   try {
-    const d = await api('/api/ai/tutor',{method:'POST',body:JSON.stringify({message:msg,conversation_id:S.tutorConvId})});
-    S.tutorMessages.push({role:'assistant',content:d.reply}); S.tutorConvId = d.conversation_id;
-  } catch(e) { S.tutorMessages.push({role:'assistant',content:'抱歉，AI服务暂时不可用。请检查API配置。'}); }
-  finally { S.tutorLoading=false; render(); setTimeout(()=>{const c=document.querySelector('#tutorChat');if(c)c.scrollTop=c.scrollHeight;},100); }
+    await streamApi('/api/ai/tutor/stream', {message:msg, conversation_id:S.tutorConvId}, (e) => {
+      if (e.type === 'delta' && e.content) {
+        streamContent += e.content;
+        S.tutorStreamContent = streamContent;
+        const chatArea = document.querySelector('#tutorChat');
+        if (chatArea) {
+          const content = chatArea.querySelector('.tutor-message.streaming .message-content');
+          if (content) content.innerHTML = renderRich(streamContent) + '<span class="stream-caret" aria-hidden="true"></span>';
+          chatArea.scrollTop = chatArea.scrollHeight;
+        }
+      } else if (e.type === 'done') {
+        S.tutorConvId = e.conversation_id || S.tutorConvId;
+      } else if (e.type === 'error') {
+        throw new Error(e.message || 'Agent执行失败');
+      }
+    });
+    // Finalize: push complete message to history
+    if (streamContent) {
+      S.tutorMessages.push({role:'assistant',content:streamContent});
+    }
+  } catch(e) {
+    // SSE stream failed, fall back to REST API
+    try {
+      const d = await api('/api/ai/tutor',{method:'POST',body:JSON.stringify({message:msg,conversation_id:S.tutorConvId})});
+      S.tutorMessages.push({role:'assistant',content:d.reply}); S.tutorConvId = d.conversation_id;
+    } catch(e2) { S.tutorMessages.push({role:'assistant',content:'AI 服务暂时不可用。请检查模型配置或网络连接后重试。'}); }
+  } finally {
+    S.tutorLoading=false; S.tutorStreamContent=''; render();
+    setTimeout(()=>{const c=document.querySelector('#tutorChat');if(c)c.scrollTop=c.scrollHeight;},100);
+  }
 }
 
 // ═══ Question AI Modal ═══
@@ -867,7 +926,7 @@ async function runQuestionAI(mode) {
 async function loadWrong() { try { S.wrongItems = (await api('/api/wrong')).items||[]; } catch(e) {} }
 async function startWrongSession(ids) {
   if (!ids.length){toast('没有可重做的错题');return;}
-  S.session = await api('/api/session',{method:'POST',body:JSON.stringify({mode:'wrong',question_ids:ids,count:'all'})});
+  S.session = await api('/api/session',{method:'POST',body:JSON.stringify({mode:'wrong',question_ids:ids,count:null})});
   S.idx=0; S.results={}; S.tab='practice'; render();
 }
 
@@ -886,12 +945,14 @@ async function clearRuntimeKey(provider) {
 
 // ═══ Event Binding ═══
 function bindEvents() {
+  S.eventsBound = true;
   document.addEventListener('click', async (e) => {
     const btn = e.target.closest('button'); if (!btn) return;
     try {
       if (btn.dataset.action==='showLogin') { S.modal='login'; render(); }
       else if (btn.dataset.action==='closeModal') { S.modal=null; render(); }
       else if (btn.dataset.action==='closeAiModal') { S.aiModal=null; render(); }
+      else if (btn.dataset.action==='logout') { await handleLogout(); }
       else if (btn.dataset.action==='profile') { S.tab='profile'; S.modal=null; render(); }
       else if (btn.dataset.action==='recommendPractice') { await recommendPractice(); }
       else if (btn.dataset.action==='generateAI') { S.tab='ai'; render(); }
@@ -914,13 +975,13 @@ function bindEvents() {
           if (password.length<6){showLoginError('密码长度不能少于6位');return;}
           if (phone.length!==11){showLoginError('请输入正确的11位手机号');return;}
           await handleRegister(account,password,name,phone);
-          showLoginSuccess('注册成功！请等待管理员审批后登录。');
+          showLoginSuccess('注册成功，请等待管理员审批后登录。');
           setTimeout(()=>{S.modal=null;render();},2000);
         } else {
           await handleLogin(account,password);
           S.modal=null;
           try { S.profile = (await api('/api/profile')).profile; } catch(x) {}
-          render(); toast('登录成功！','success');
+          render(); toast('登录成功','success');
         }
       }
       else if (btn.dataset.tab) {
@@ -973,6 +1034,16 @@ function bindEvents() {
     }
   });
 
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-tutor-fill]');
+    if (!btn) return;
+    const input = document.querySelector('#tutorInput');
+    if (input) {
+      input.value = btn.dataset.tutorFill;
+      input.focus();
+    }
+  });
+
   // 委托事件：管理审批按钮（避免内联onclick的XSS风险）
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-approve-user]');
@@ -985,7 +1056,7 @@ function bindEvents() {
 
   // 委托事件：tutor input 回车发送 (替代 inline onkeydown)
   document.addEventListener('keydown', (e) => {
-    if (e.target?.id==='tutorInput' && e.key==='Enter') {
+    if (e.target?.id==='tutorInput' && e.key==='Enter' && !e.shiftKey) {
       e.preventDefault();
       sendTutorMsg();
     }

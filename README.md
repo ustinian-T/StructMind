@@ -71,6 +71,28 @@ python server.py
 - 智谱 AI：`glm-5.1`、`glm-5`、`glm-4.7-flash`
 - DeepSeek：`deepseek-v4-flash`、`deepseek-v4-pro`
 
+### 统一 Agent 核心
+
+Tutor 的唯一执行核心位于 FastAPI：`TurnContext → TutorOrchestrator → AsyncModelGateway`。Web 的 REST、SSE、WebSocket，以及 uni-app 经 uniCloud 转发的请求，统一返回 `structmind.agent.v1` 事件协议。主要事件为 `meta`、`route`、`delta`、`tool_start`、`tool_result`、`usage`、`done`、`error`；`delta.content` 是唯一文本增量字段。
+
+可配置的硬预算：
+
+```bash
+SM_AGENT_MAX_TOOL_ROUNDS=2
+SM_AGENT_MAX_OUTPUT_TOKENS=1200
+SM_AGENT_TIMEOUT_SECONDS=45
+SM_AGENT_MAX_HISTORY_MESSAGES=12
+```
+
+uniCloud 不保存 Tutor Prompt、不直连 Tutor 模型。部署时必须在 FastAPI 和 `structmind-ai` 云函数中配置同一高强度 `SM_AGENT_SERVICE_KEY`，并在云函数配置 FastAPI 地址：
+
+```bash
+SM_AGENT_CORE_URL=https://your-fastapi.example.com
+SM_AGENT_SERVICE_KEY=使用密码管理器生成的随机服务凭据
+```
+
+`/api/internal/agent/tutor` 仅接受 `X-StructMind-Service-Key`，不会开放本地用户画像工具；Web 用户入口仍使用 Bearer 会话认证和个人 AI 额度。
+
 ### Docker 部署
 
 ```bash
@@ -80,13 +102,13 @@ docker run -p 8765:8765 -e DEEPSEEK_API_KEY="your-key" structmind
 
 ## 🔑 管理员账号
 
-首次启动时自动创建：
+仅在显式设置 `SM_ADMIN_PASSWORD` 后，首次启动时自动创建或修复管理员：
 
 | 账号 | 密码 |
 |------|------|
-| `tanshuhong` | `XX05020604` |
+| `SM_ADMIN_ACCOUNT`（默认 `tanshuhong`） | `SM_ADMIN_PASSWORD` 环境变量中的值 |
 
-> ⚠️ **生产部署前**请通过环境变量修改默认密码：
+> 项目不提供默认管理员密码。启动前必须显式设置：
 > ```bash
 > export SM_ADMIN_PASSWORD="你的强密码"
 > ```
@@ -122,8 +144,10 @@ StructMind/
 │   ├── SmRadar.vue
 │   ├── SmTag.vue
 │   └── SmToast.vue
+├── src/agents/                   # 统一 TutorOrchestrator、TurnContext 与事件协议
+├── src/ai/gateway.py             # OpenAI 兼容的异步流式模型网关
 ├── uniCloud-aliyun/              # uniCloud 云服务
-│   ├── cloudfunctions/           # 云函数（auth / admin / practice / ai / stats / push）
+│   ├── cloudfunctions/           # 云函数；Tutor 仅作为带服务凭据的 FastAPI 代理
 │   └── database/                 # DB Schema（权限配置）
 ├── tests/
 │   └── test_core.py              # 核心功能单元测试
@@ -165,6 +189,9 @@ StructMind/
 | POST | `/api/ai/generate` | AI 生成变式题 |
 | POST | `/api/ai/answer` | AI 题批改 |
 | POST | `/api/ai/tutor` | 苏格拉底式 AI 答疑 |
+| POST | `/api/ai/tutor/stream` | 同协议 SSE 逐 Token 答疑 |
+| WS | `/ws/tutor` | 同协议 WebSocket 逐 Token 答疑 |
+| POST | `/api/internal/agent/tutor` | uniCloud 服务凭据代理入口 |
 | POST | `/api/question/ai/stream` | 题目 AI 讲解（流式） |
 
 ### 社区 & 排行

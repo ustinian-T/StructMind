@@ -168,16 +168,17 @@
 <script>
 import SmCard from '@/components/SmCard.vue'
 import SmButton from '@/components/SmButton.vue'
+import { callCloud, normalizeCloudProfile, normalizeCloudQuestion } from '@/utils/cloud.js'
 // getApp() 是 uni-app 全局函数，无需导入
 
 export default {
   components: { SmCard, SmButton },
   data() {
     return {
-      profile: null,
-      heatmapData: [],
-      chapterStats: [],
-      recentWrong: [],
+      profile: Object.create(null),
+      heatmapData: Array(),
+      chapterStats: Array(),
+      recentWrong: Array(),
       todayCount: 0,
       heatLevels: [0, 1, 2, 3, 4],
       quickActions: [
@@ -225,22 +226,30 @@ export default {
       const app = getApp()
       if (!app.globalData?.token) return
       try {
-        const apiBase = app.globalData.apiBase || 'https://datastytest.tshai.top'
         const token = app.globalData.token
-        const [profileRes, statsRes, wrongRes] = await Promise.all([
-          uni.request({ url: `${apiBase}/api/profile`, header: { Authorization: `Bearer ${token}` } }),
-          uni.request({ url: `${apiBase}/api/stats` }),
-          uni.request({ url: `${apiBase}/api/wrong`, header: { Authorization: `Bearer ${token}` } }),
+        const [profileData, wrongData] = await Promise.all([
+          callCloud('structmind-stats', 'userProfile', { token }),
+          callCloud('structmind-practice', 'getWrongQuestions', { token, page_size: 20 }),
         ])
-        this.profile = profileRes.data?.profile || null
-        const stats = statsRes.data || {}
-        const wrongItems = wrongRes.data?.items || []
+        this.profile = profileData.profile ? normalizeCloudProfile(profileData.profile) : null
+        const stats = { chapter_stats: Object.entries(this.profile?.chapter_stats || {}).map(
+          ([chapter, item]) => {
+            const rawItem = JSON.parse(JSON.stringify(item || {})) || { attempted: 0 }
+            return { chapter, attempted: Number(rawItem.attempted) || 0 }
+          },
+        ) }
+        const wrongItems = (wrongData.questions || []).map(question => ({
+          question: normalizeCloudQuestion(question),
+        }))
 
         // 章节统计
-        const chapters = stats.chapters || {}
-        const maxCount = Math.max(1, ...Object.values(chapters))
-        this.chapterStats = Object.entries(chapters).map(([name, count]) => ({
-          name, count, pct: Math.round((count / maxCount) * 100),
+        const maxCount = (stats.chapter_stats || []).reduce(
+          (max, item) => Math.max(max, Number(item.attempted) || 0), 1,
+        )
+        this.chapterStats = (stats.chapter_stats || []).map(item => ({
+          name: item.chapter,
+          count: Number(item.attempted) || 0,
+          pct: Math.round(((Number(item.attempted) || 0) / maxCount) * 100),
         }))
 
         // 最近错题
@@ -252,13 +261,13 @@ export default {
 
         // 生成最近30天热力图数据
         this.heatmapData = this.generateHeatmap(stats)
-        this.todayCount = stats.today_count || 0
+        this.todayCount = 0
       } catch (e) {
         console.log('Dashboard load failed', e)
       }
     },
     generateHeatmap(stats) {
-      const days = []
+      const days = Array()
       const now = new Date()
       const dailyActivity = stats.daily_activity || {}
       for (let i = 29; i >= 0; i--) {

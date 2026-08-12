@@ -9,13 +9,17 @@ from fastapi import APIRouter, Depends, Request
 from src.models.schemas import AssignmentGradeRequest, DiscussionGradeRequest
 from src.ai.client import AIClient
 from src.db.database import public_assignment_question, public_discussion
-from src.routes.deps import require_auth, selected_bank, make_error_response
+from src.routes.deps import require_ai_access, selected_bank, make_error_response
 
 router = APIRouter(tags=["assignment"])
 
 
 @router.post("/assignment/grade")
-async def grade_assignment(req: AssignmentGradeRequest, request: Request):
+async def grade_assignment(
+    req: AssignmentGradeRequest,
+    request: Request,
+    _auth=Depends(require_ai_access),
+):
     try:
         db = request.app.state.db
         assignment_bank = request.app.state.assignment_bank
@@ -66,7 +70,11 @@ async def grade_assignment(req: AssignmentGradeRequest, request: Request):
 
 
 @router.post("/discussion/grade")
-async def grade_discussion(req: DiscussionGradeRequest, request: Request):
+async def grade_discussion(
+    req: DiscussionGradeRequest,
+    request: Request,
+    _auth=Depends(require_ai_access),
+):
     try:
         db = request.app.state.db
         exam_bank = request.app.state.exam_bank

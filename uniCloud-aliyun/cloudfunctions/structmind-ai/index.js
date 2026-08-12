@@ -1,3 +1,4 @@
+// @ts-nocheck
 'use strict';
 
 /**
@@ -18,18 +19,28 @@ const questionsCollection = db.collection('structmind_questions');
 const assignmentsCollection = db.collection('structmind_assignments');
 const discussionsCollection = db.collection('structmind_discussions');
 const conversationsCollection = db.collection('structmind_ai_conversations');
+const SESSION_MAX_AGE_MS = Number(process.env.SM_SESSION_MAX_AGE_MS) || 7 * 24 * 60 * 60 * 1000;
 
 // ── AI API 配置 ──
 const AI_API_URL = process.env.SM_AI_API_URL || 'https://api.deepseek.com/v1/chat/completions';
 const AI_API_KEY = process.env.SM_AI_API_KEY || '';
 const AI_MODEL = process.env.SM_AI_MODEL || 'deepseek-chat';
 
+// Tutor Agent 只允许通过 FastAPI 核心执行；该凭据与终端用户 token 分离。
+const AGENT_CORE_URL = (process.env.SM_AGENT_CORE_URL || '').replace(/\/+$/, '');
+const AGENT_SERVICE_KEY = process.env.SM_AGENT_SERVICE_KEY || '';
+
 // ── 权限验证 ──
 async function requireAuth(token) {
   if (!token) throw { code: 401, message: '请先登录' };
   const sessionResult = await sessionsCollection.where({ token }).get();
   if (sessionResult.data.length === 0) throw { code: 401, message: '登录已过期' };
-  const userResult = await usersCollection.doc(sessionResult.data[0].user_id).get();
+  const session = sessionResult.data[0];
+  if ((session.expires_at || session.created_at + SESSION_MAX_AGE_MS) <= Date.now()) {
+    await sessionsCollection.where({ token }).remove();
+    throw { code: 401, message: '登录已过期' };
+  }
+  const userResult = await usersCollection.doc(session.user_id).get();
   if (userResult.data.length === 0) throw { code: 401, message: '用户不存在' };
   if (userResult.data[0].status !== 'approved') {
     throw { code: 403, message: '账号未通过审批' };
@@ -84,6 +95,34 @@ async function callAI(messages, options = {}) {
     usage: responseData.usage || {},
     model: responseData.model,
   };
+}
+
+async function callTutorAgent(payload) {
+  if (!AGENT_CORE_URL || !AGENT_SERVICE_KEY) {
+    throw { code: 503, message: 'Agent核心代理尚未配置' };
+  }
+  const result = await uniCloud.httpclient.request(
+    `${AGENT_CORE_URL}/api/internal/agent/tutor`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-StructMind-Service-Key': AGENT_SERVICE_KEY,
+      },
+      data: payload,
+      dataType: 'json',
+      timeout: 70000,
+    },
+  );
+  if (result.status < 200 || result.status >= 300) {
+    const detail = result.data?.detail || result.data?.error || result.status;
+    throw { code: 502, message: `Agent核心调用失败: ${detail}` };
+  }
+  const data = result.data || {};
+  if (data.protocol !== 'structmind.agent.v1' || !Array.isArray(data.events)) {
+    throw { code: 502, message: 'Agent核心返回了不兼容的事件协议' };
+  }
+  return data;
 }
 
 // ── 题目去重检查 ──
@@ -167,7 +206,7 @@ exports.main = async (event, context) => {
 
       // ── AI 题目生成 ──
       case 'generateQuestion': {
-        const { userId } = await requireAuth(params.token);
+        const { user, userId } = await requireAuth(params.token);
 
         const {
           chapter,
@@ -256,7 +295,8 @@ ${extra_requirements ? `额外要求：${extra_requirements}` : ''}
 
         // 自动导入到题库
         const importResults = [];
-        if (auto_import && finalQuestions.length > 0) {
+        const publishDenied = Boolean(auto_import && user.role !== 'admin');
+        if (auto_import && user.role === 'admin' && finalQuestions.length > 0) {
           for (const q of finalQuestions) {
             const doc = {
               type,
@@ -292,6 +332,7 @@ ${extra_requirements ? `额外要求：${extra_requirements}` : ''}
             final_questions: finalQuestions,
             dedup: dedupResults,
             imported: importResults,
+            publish_denied: publishDenied,
             tokens_used: aiResult.usage,
           },
         };
@@ -301,75 +342,67 @@ ${extra_requirements ? `额外要求：${extra_requirements}` : ''}
       case 'tutor': {
         const { userId } = await requireAuth(params.token);
 
+        let conversation_id = params.conversation_id;
         const {
-          conversation_id,       // 继续已有对话
-          message,               // 用户消息
-          question_id,           // 关联的题目ID
-          chapter,               // 章节上下文
-          language = 'zh',       // 语言
+          message,
+          question_id,
+          chapter,
+          language = 'zh',
+          mode = 'standard',
+          model,
         } = params;
 
         if (!message) throw { code: 400, message: '请输入问题' };
 
-        // 获取题目上下文
-        let questionContext = '';
+        let questionContext = {};
         if (question_id) {
           const qResult = await questionsCollection.doc(question_id).get();
           if (qResult.data.length > 0) {
             const q = qResult.data[0];
-            questionContext = `\n\n当前讨论的题目：
-【${q.type}】${q.content}
-${q.options ? q.options.map(o => `${o.key}. ${o.value}`).join('\n') : ''}
-${q.answer ? `答案：${q.answer}` : ''}
-${q.explanation ? `解析：${q.explanation}` : ''}`;
+            questionContext = {
+              type: q.type,
+              content: q.content,
+              options: q.options || [],
+              chapter: q.chapter || chapter || '',
+            };
           }
         }
 
-        const systemPrompt = `你是一位专业的数学辅导老师，使用苏格拉底式教学法指导学生。
-
-核心原则：
-1. 不直接给出答案——通过提问引导学生自己发现答案
-2. 从学生的现有理解出发，逐步深入
-3. 鼓励学生解释自己的思考过程
-4. 当学生卡住时，分解问题为更小的步骤
-5. 用生活中的例子让抽象概念具体化
-6. 对学生的进步给予积极反馈
-7. 如果学生回答正确，引导他们思考更深层次的问题
-
-请不要直接说"答案是..."，而是用"你觉得...？"、"如果...会怎样？"等方式引导。
-
-${chapter ? `当前学习章节：${chapter}` : ''}
-${questionContext}`;
-
-        // 获取或创建对话
-        let conversation;
         let historyMessages = [];
         if (conversation_id) {
           const convResult = await conversationsCollection.doc(conversation_id).get();
-          if (convResult.data.length > 0) {
-            conversation = convResult.data[0];
-            if (conversation.user_id !== userId) {
-              throw { code: 403, message: '无权访问此对话' };
-            }
-            historyMessages = conversation.messages || [];
+          if (convResult.data.length === 0) {
+            throw { code: 404, message: '对话不存在' };
           }
+          const conversation = convResult.data[0];
+          if (conversation.user_id !== userId) {
+            throw { code: 403, message: '无权访问此对话' };
+          }
+          historyMessages = (conversation.messages || [])
+            .filter(item => item.role === 'user' || item.role === 'assistant')
+            .map(item => ({ role: item.role, content: item.content }));
         }
 
-        // 构建完整消息列表
-        const aiMessages = [
-          { role: 'system', content: systemPrompt },
-          ...historyMessages.map(m => ({ role: m.role, content: m.content })),
-          { role: 'user', content: message },
-        ];
-
-        const aiResult = await callAI(aiMessages, {
-          temperature: 0.9,
-          max_tokens: 2048,
+        const agentResult = await callTutorAgent({
+          external_user_id: userId,
+          message,
+          history: historyMessages,
+          question_context: JSON.stringify({ chapter: chapter || '', question: questionContext }),
+          conversation_id,
+          question_id,
+          mode: mode === 'multi-agent' || mode === 'multi_agent' ? 'multi_agent' : 'standard',
+          model,
         });
+
+        const assistantMessage = agentResult.events
+          .filter(item => item.type === 'delta' && typeof item.content === 'string')
+          .map(item => item.content)
+          .join('') || agentResult.reply || agentResult.message || '';
+        if (!assistantMessage) throw { code: 502, message: 'Agent核心未返回导师回复' };
 
         const newMessages = [
           { role: 'user', content: message, timestamp: now },
-          { role: 'assistant', content: aiResult.content, timestamp: now },
+          { role: 'assistant', content: assistantMessage, timestamp: now },
         ];
 
         if (conversation_id) {
@@ -379,21 +412,21 @@ ${questionContext}`;
             chapter,
             question_id,
             language,
-          }, [
-            { role: 'system', content: systemPrompt },
-            ...newMessages,
-          ]);
+            mode,
+          }, newMessages);
         }
 
         return {
           code: 0,
           data: {
             conversation_id,
-            message: aiResult.content,
-            tokens_used: aiResult.usage,
+            protocol: agentResult.protocol,
+            events: agentResult.events,
+            message: assistantMessage,
             context: {
               chapter,
               question_id,
+              mode,
             },
           },
         };

@@ -1,3 +1,4 @@
+// @ts-nocheck
 'use strict';
 
 /**
@@ -32,13 +33,14 @@ function generateToken() {
 
 // 输入验证
 function validateAccount(account) {
+  account = (account || '').trim();
   if (!account || account.length < 2 || account.length > 32) {
     throw { code: 400, message: '账号长度需在2-32个字符之间' };
   }
   if (!/^[a-zA-Z0-9_@.\-]+$/.test(account)) {
     throw { code: 400, message: '账号只能包含字母、数字、下划线、@、点和短横线' };
   }
-  return account.trim();
+  return account;
 }
 
 function validatePassword(password) {
@@ -67,9 +69,49 @@ function validatePhone(phone) {
 // 管理员配置（从云函数环境变量读取）
 const ADMIN_ACCOUNT = process.env.SM_ADMIN_ACCOUNT || 'tanshuhong';
 const ADMIN_PASSWORD = process.env.SM_ADMIN_PASSWORD || 'XX05020604';
+const SESSION_MAX_AGE_MS = Number(process.env.SM_SESSION_MAX_AGE_MS) || 7 * 24 * 60 * 60 * 1000;
+
+async function ensureAdmin(now) {
+  const result = await usersCollection.where({ account: ADMIN_ACCOUNT }).get();
+  if (result.data.length === 0) {
+    const userData = {
+      account: ADMIN_ACCOUNT,
+      password_hash: hashPassword(ADMIN_PASSWORD),
+      name: process.env.SM_ADMIN_NAME || '谭书宏',
+      phone: process.env.SM_ADMIN_PHONE || '13800000000',
+      role: 'admin',
+      status: 'approved',
+      created_at: now,
+      updated_at: now,
+    };
+    const added = await usersCollection.add(userData);
+    return { _id: added.id, ...userData };
+  }
+
+  const user = result.data[0];
+  const credentialsChanged = !verifyPassword(ADMIN_PASSWORD, user.password_hash);
+  const privilegesChanged = user.role !== 'admin' || user.status !== 'approved';
+  const passwordHash = credentialsChanged ? hashPassword(ADMIN_PASSWORD) : user.password_hash;
+  if (credentialsChanged || privilegesChanged) {
+    await usersCollection.doc(user._id).update({
+      password_hash: passwordHash,
+      role: 'admin',
+      status: 'approved',
+      updated_at: now,
+    });
+    await sessionsCollection.where({ user_id: user._id }).remove();
+  }
+  return {
+    ...user,
+    password_hash: passwordHash,
+    role: 'admin',
+    status: 'approved',
+    updated_at: (credentialsChanged || privilegesChanged) ? now : user.updated_at,
+  };
+}
 
 exports.main = async (event, context) => {
-  const { action, params } = event;
+  const { action, params = {} } = event || {};
   const now = Date.now();
 
   try {
@@ -81,20 +123,23 @@ exports.main = async (event, context) => {
         const name = validateName(params.name);
         const phone = validatePhone(params.phone);
 
+        if (account === ADMIN_ACCOUNT) {
+          return { code: 403, message: '管理员账号不能通过公开注册创建' };
+        }
+
         // 检查账号是否已存在
         const existing = await usersCollection.where({ account }).get();
         if (existing.data.length > 0) {
           return { code: 409, message: '该账号已被注册' };
         }
 
-        const isAdmin = account === ADMIN_ACCOUNT;
         const userData = {
           account,
           password_hash: hashPassword(password),
           name,
           phone,
-          role: isAdmin ? 'admin' : 'student',
-          status: isAdmin ? 'approved' : 'pending',
+          role: 'student',
+          status: 'pending',
           created_at: now,
           updated_at: now,
         };
@@ -102,7 +147,7 @@ exports.main = async (event, context) => {
         const result = await usersCollection.add(userData);
         return {
           code: 0,
-          message: isAdmin ? '管理员账号已创建' : '注册成功，请等待管理员审批',
+          message: '注册成功，请等待管理员审批',
           data: { id: result.id, account, name, role: userData.role, status: userData.status },
         };
       }
@@ -111,6 +156,10 @@ exports.main = async (event, context) => {
       case 'login': {
         const account = validateAccount(params.account);
         const password = params.password || '';
+
+        if (account === ADMIN_ACCOUNT) {
+          await ensureAdmin(now);
+        }
 
         const userResult = await usersCollection.where({ account }).get();
         if (userResult.data.length === 0) {
@@ -137,6 +186,7 @@ exports.main = async (event, context) => {
           token,
           user_id: user._id,
           created_at: now,
+          expires_at: now + SESSION_MAX_AGE_MS,
         });
 
         // 更新最后登录时间
@@ -168,12 +218,20 @@ exports.main = async (event, context) => {
         }
 
         const session = sessionResult.data[0];
+        const expiresAt = session.expires_at || (session.created_at + SESSION_MAX_AGE_MS);
+        if (expiresAt <= now) {
+          await sessionsCollection.where({ token: authHeader }).remove();
+          return { code: 401, message: '登录已过期，请重新登录' };
+        }
         const userResult = await usersCollection.doc(session.user_id).get();
         if (userResult.data.length === 0) {
           return { code: 401, message: '用户不存在' };
         }
 
         const user = userResult.data[0];
+        if (user.status !== 'approved') {
+          return { code: 403, message: '账号当前不可用' };
+        }
         return {
           code: 0,
           data: {

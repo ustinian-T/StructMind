@@ -19,16 +19,16 @@ export default {
   data() {
     return {
       iconMap: { info: 'ℹ️', success: '✅', error: '❌', warning: '⚠️' },
-      timer: null,
+      timer: 0,
     }
   },
   watch: {
     visible(val) {
-      if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+      if (this.timer) { clearTimeout(this.timer); this.timer = 0; }
       if (val && this.duration > 0) {
         this.timer = setTimeout(() => {
           this.$emit('close')
-          this.timer = null
+          this.timer = 0
         }, this.duration)
       }
     },

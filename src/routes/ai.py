@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import json
-import time
-from typing import Any
+from typing import Any, AsyncIterator
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
 
 from src.models.schemas import (
     AIGenerateRequest,
@@ -14,14 +13,22 @@ from src.models.schemas import (
     AITutorRequest,
     QuestionAIRequest,
     AISupplementRequest,
+    AgentServiceTutorRequest,
 )
 from src.ai.client import AIClient, get_ai_client
+from src.ai.gateway import AsyncModelGateway
 from src.ai.streaming import sse_stream
 from src.agents import (
-    SOCRATIC_SYSTEM_PROMPT,
-    classify_intent,
-    run_multi_agent_pipeline,
     generate_ai_question as agent_generate_question,
+)
+from src.agents.context import AgentBudget, TurnContext
+from src.agents.events import AgentEvent
+from src.agents.orchestrator import TutorOrchestrator
+from src.config import (
+    AGENT_MAX_HISTORY_MESSAGES,
+    AGENT_MAX_OUTPUT_TOKENS,
+    AGENT_MAX_TOOL_ROUNDS,
+    AGENT_TIMEOUT_SECONDS,
 )
 from src.tools.registry import ToolRegistry
 from src.db.database import (
@@ -34,32 +41,224 @@ from src.routes.deps import (
     get_exam_bank,
     get_assignment_bank,
     selected_bank,
-    require_auth,
-    parse_auth_header,
+    consume_ai_quota,
+    require_ai_access,
+    require_agent_service,
     make_error_response,
 )
 
 router = APIRouter(tags=["ai"])
+websocket_router = APIRouter(tags=["ai"])
 
 
 def _get_ai_client(model: str | None = None) -> AIClient:
     return AIClient(model=model)
 
 
+def _agent_budget() -> AgentBudget:
+    return AgentBudget(
+        max_tool_rounds=AGENT_MAX_TOOL_ROUNDS,
+        max_output_tokens=AGENT_MAX_OUTPUT_TOKENS,
+        timeout_seconds=AGENT_TIMEOUT_SECONDS,
+        max_history_messages=AGENT_MAX_HISTORY_MESSAGES,
+    )
+
+
+def _new_orchestrator(request_or_websocket, model: str | None) -> TutorOrchestrator:
+    factory = getattr(request_or_websocket.app.state, "agent_gateway_factory", None)
+    gateway = factory(model) if factory else AsyncModelGateway(model=model)
+    return TutorOrchestrator(gateway)
+
+
+def _question_context(exam_bank, question_id: int | None) -> str:
+    if not question_id:
+        return ""
+    question = exam_bank.by_id.get(int(question_id))
+    if not question:
+        return ""
+    return json.dumps(
+        public_bank_question(question, include_answer=False),
+        ensure_ascii=False,
+    )
+
+
+def _prepare_local_turn(
+    request_or_websocket,
+    req: AITutorRequest,
+    auth: dict[str, Any],
+    mode: str,
+) -> tuple[TurnContext, list[dict[str, str]], ToolRegistry]:
+    db = request_or_websocket.app.state.db
+    exam_bank = request_or_websocket.app.state.exam_bank
+    history: list[dict[str, str]] = []
+    if req.conversation_id:
+        conversation = db.get_conversation(int(req.conversation_id), auth["user_id"])
+        if not conversation:
+            raise KeyError("对话不存在。")
+        history = [
+            {"role": item["role"], "content": item["content"]}
+            for item in conversation["messages"]
+            if item.get("role") in {"user", "assistant"}
+        ]
+    context = TurnContext(
+        user_id=int(auth["user_id"]),
+        message=req.message,
+        history=history,
+        question_context=_question_context(exam_bank, req.question_id),
+        user_profile=db.get_user_profile(int(auth["user_id"])),
+        conversation_id=req.conversation_id,
+        question_id=req.question_id,
+        mode="multi_agent" if mode == "multi_agent" else "standard",
+        model=req.model,
+        budget=_agent_budget(),
+    )
+    return context, history, ToolRegistry(exam_bank, db, int(auth["user_id"]))
+
+
+async def _stream_local_turn(
+    request_or_websocket,
+    context: TurnContext,
+    history: list[dict[str, str]],
+    tool_registry: ToolRegistry,
+) -> AsyncIterator[AgentEvent]:
+    db = request_or_websocket.app.state.db
+    orchestrator = _new_orchestrator(request_or_websocket, context.model)
+    reply_parts: list[str] = []
+    async for event in orchestrator.stream(context, tool_registry):
+        if event.type == "delta" and event.content:
+            reply_parts.append(event.content)
+        if event.type == "done":
+            reply = "".join(reply_parts)
+            updated = [
+                *history,
+                {"role": "user", "content": context.message},
+                {"role": "assistant", "content": reply},
+            ]
+            if context.conversation_id:
+                db.update_conversation(
+                    int(context.conversation_id),
+                    int(context.user_id),
+                    updated,
+                )
+                conversation_id = int(context.conversation_id)
+            else:
+                conversation_id = db.save_conversation(
+                    int(context.user_id),
+                    int(context.question_id) if context.question_id else None,
+                    "multi_agent" if context.mode == "multi_agent" else "tutor",
+                    updated,
+                )
+            event = event.model_copy(update={"conversation_id": conversation_id})
+        yield event
+
+
+async def _collect_local_turn(
+    request: Request,
+    context: TurnContext,
+    history: list[dict[str, str]],
+    tool_registry: ToolRegistry,
+) -> dict[str, Any]:
+    events = [
+        event.model_dump(mode="json")
+        async for event in _stream_local_turn(request, context, history, tool_registry)
+    ]
+    reply = "".join(
+        event.get("content", "") for event in events if event["type"] == "delta"
+    )
+    done = next((event for event in reversed(events) if event["type"] == "done"), {})
+    return {
+        "protocol": "structmind.agent.v1",
+        "events": events,
+        "reply": reply,
+        "message": reply,
+        "conversation_id": done.get("conversation_id"),
+        "mode": context.mode,
+        "model": context.model or "default",
+    }
+
+
+@websocket_router.websocket("/ws/tutor")
+async def tutor_websocket(websocket: WebSocket):
+    """Authenticated WebSocket adapter over the shared Agent event stream."""
+    await websocket.accept()
+    db = websocket.app.state.db
+    exam_bank = websocket.app.state.exam_bank
+    session: dict[str, Any] | None = None
+    try:
+        while True:
+            payload = await websocket.receive_json()
+            message_type = payload.get("type")
+            if message_type == "auth":
+                session = db.get_session(str(payload.get("token") or ""))
+                if not session or session.get("status") != "approved":
+                    await websocket.send_json({"type": "error", "error": "登录状态已失效，请重新登录。"})
+                    await websocket.close(code=1008)
+                    return
+                await websocket.send_json({"type": "auth", "ok": True})
+                continue
+            if message_type != "message":
+                await websocket.send_json({"type": "error", "error": "不支持的消息类型。"})
+                continue
+            if not session:
+                session = db.get_session(str(payload.get("token") or ""))
+            if not session or session.get("status") != "approved":
+                await websocket.send_json({"type": "error", "error": "请先登录。"})
+                await websocket.close(code=1008)
+                return
+
+            try:
+                consume_ai_quota(websocket.app, int(session["user_id"]))
+            except Exception as exc:
+                await websocket.send_json({"type": "error", "error": getattr(exc, "detail", str(exc))})
+                continue
+
+            try:
+                req = AITutorRequest(
+                    message=str(payload.get("message") or ""),
+                    conversation_id=payload.get("conversation_id"),
+                    question_id=payload.get("question_id"),
+                    model=payload.get("model"),
+                    mode=str(payload.get("mode") or "standard"),
+                )
+                mode = "multi_agent" if req.mode in {"multi-agent", "multi_agent"} else "standard"
+                context, history, tool_registry = _prepare_local_turn(
+                    websocket, req, session, mode,
+                )
+                async for event in _stream_local_turn(
+                    websocket, context, history, tool_registry,
+                ):
+                    await websocket.send_json(event.model_dump(mode="json"))
+            except Exception as exc:
+                await websocket.send_json({
+                    "protocol": "structmind.agent.v1",
+                    "type": "error",
+                    "message": str(exc),
+                })
+    except WebSocketDisconnect:
+        return
+    except Exception as exc:
+        try:
+            await websocket.send_json({"type": "error", "error": str(exc)})
+        except (RuntimeError, WebSocketDisconnect):
+            return
+
+
 # ── AI 出题 ──
 
 
 @router.post("/ai/generate")
-async def ai_generate(req: AIGenerateRequest, request: Request):
+async def ai_generate(
+    req: AIGenerateRequest,
+    request: Request,
+    _auth=Depends(require_ai_access),
+):
     try:
         db = request.app.state.db
         exam_bank = request.app.state.exam_bank
-        session = parse_auth_header(request.headers.get("Authorization"), db=db)
-        user_id = session["user_id"] if session else 0
         client = _get_ai_client(req.model)
         return agent_generate_question(
             client, exam_bank, db,
-            {"model": req.model, "qtype": req.qtype, "source_question_id": req.source_question_id, "user_id": user_id},
+            {"model": req.model, "qtype": req.qtype, "source_question_id": req.source_question_id, "user_id": _auth["user_id"]},
         )
     except Exception as exc:
         status, body = make_error_response(exc)
@@ -67,7 +266,11 @@ async def ai_generate(req: AIGenerateRequest, request: Request):
 
 
 @router.post("/ai/answer")
-async def ai_answer(req: AIAnswerRequest, request: Request):
+async def ai_answer(
+    req: AIAnswerRequest,
+    request: Request,
+    _auth=Depends(require_ai_access),
+):
     try:
         db = request.app.state.db
         ai_id = str(req.ai_question_id or req.id or "")
@@ -81,7 +284,10 @@ async def ai_answer(req: AIAnswerRequest, request: Request):
             answer=item["answer"], raw_correct=item["answer"], score=None,
         )
         result = grade_answer(pseudo_question, req.answer)
-        db.record_attempt(0, "ai", item["qtype"], req.answer, item["answer"], result["is_correct"])
+        db.record_attempt(
+            0, "ai", item["qtype"], req.answer, item["answer"],
+            result["is_correct"], user_id=_auth["user_id"],
+        )
         result["analysis"] = item.get("analysis") or result["analysis"]
         return result
     except Exception as exc:
@@ -90,7 +296,11 @@ async def ai_answer(req: AIAnswerRequest, request: Request):
 
 
 @router.post("/ai/supplement")
-async def ai_supplement(req: AISupplementRequest, request: Request):
+async def ai_supplement(
+    req: AISupplementRequest,
+    request: Request,
+    _auth=Depends(require_ai_access),
+):
     try:
         exam_bank = request.app.state.exam_bank
         question = exam_bank.by_id.get(req.question_id)
@@ -131,110 +341,20 @@ async def ai_supplement(req: AISupplementRequest, request: Request):
 
 
 @router.post("/ai/tutor")
-async def socratic_tutor(req: AITutorRequest, request: Request, _auth=Depends(require_auth)):
+async def socratic_tutor(req: AITutorRequest, request: Request, _auth=Depends(require_ai_access)):
     try:
-        db = request.app.state.db
-        exam_bank = request.app.state.exam_bank
-        model = req.model
-        client = _get_ai_client(model)
-        message = req.message.strip()
-        if not message:
-            raise ValueError("请输入你的问题或思考。")
-
-        question_context = ""
-        if req.question_id:
-            q = exam_bank.by_id.get(req.question_id)
-            if q:
-                question_context = f"\n\n【学生正在练习的题目】\n{public_bank_question(q, include_answer=False)}"
-
-        history = []
-        conv_id = req.conversation_id
-        if conv_id:
-            convs = db.get_conversations(_auth["user_id"], 1)
-            for conv in convs:
-                if conv["id"] == int(conv_id):
-                    history = conv["messages"]
-                    break
-
-        messages = [
-            {"role": "system", "content": SOCRATIC_SYSTEM_PROMPT + question_context},
-            *history[-10:],
-            {"role": "user", "content": message},
-        ]
-        reply = client.chat(messages, model=model, temperature=0.7, max_tokens=1200)
-
-        history.append({"role": "user", "content": message})
-        history.append({"role": "assistant", "content": reply})
-        if conv_id:
-            with db.connect() as conn:
-                conn.execute(
-                    "UPDATE ai_conversations SET messages_json = ?, updated_at = ? WHERE id = ?",
-                    (json.dumps(history, ensure_ascii=False), time.time(), int(conv_id)),
-                )
-            new_id = int(conv_id)
-        else:
-            new_id = db.save_conversation(
-                _auth["user_id"], req.question_id, "tutor", history,
-            )
-        return {
-            "conversation_id": new_id, "reply": reply,
-            "model": model or "default", "mode": "socratic_tutor",
-        }
+        context, history, tools = _prepare_local_turn(request, req, _auth, "standard")
+        return await _collect_local_turn(request, context, history, tools)
     except Exception as exc:
         status, body = make_error_response(exc)
         return request.app.state._json_response(body, status)
 
 
 @router.post("/ai/tutor/stream")
-async def socratic_tutor_stream(req: AITutorRequest, request: Request, _auth=Depends(require_auth)):
+async def socratic_tutor_stream(req: AITutorRequest, request: Request, _auth=Depends(require_ai_access)):
     try:
-        db = request.app.state.db
-        exam_bank = request.app.state.exam_bank
-        model = req.model
-        client = _get_ai_client(model)
-        message = req.message.strip()
-        if not message:
-            raise ValueError("请输入你的问题或思考。")
-
-        question_context = ""
-        if req.question_id:
-            q = exam_bank.by_id.get(req.question_id)
-            if q:
-                question_context = f"\n\n【学生正在练习的题目】\n{public_bank_question(q, include_answer=False)}"
-
-        history = []
-        conv_id = req.conversation_id
-        if conv_id:
-            convs = db.get_conversations(_auth["user_id"], 1)
-            for conv in convs:
-                if conv["id"] == int(conv_id):
-                    history = conv["messages"]
-                    break
-
-        messages = [
-            {"role": "system", "content": SOCRATIC_SYSTEM_PROMPT + question_context},
-            *history[-10:],
-            {"role": "user", "content": message},
-        ]
-
-        def stream():
-            full_reply = ""
-            for delta in client.chat_stream(messages, model=model, temperature=0.7, max_tokens=1200):
-                full_reply += delta
-                yield {"delta": delta}
-            # 保存对话
-            history.append({"role": "user", "content": message})
-            history.append({"role": "assistant", "content": full_reply})
-            if conv_id:
-                with db.connect() as conn:
-                    conn.execute(
-                        "UPDATE ai_conversations SET messages_json = ?, updated_at = ? WHERE id = ?",
-                        (json.dumps(history, ensure_ascii=False), time.time(), int(conv_id)),
-                    )
-            else:
-                db.save_conversation(_auth["user_id"], req.question_id, "tutor", history)
-
-        return sse_stream(stream())
+        context, history, tools = _prepare_local_turn(request, req, _auth, "standard")
+        return sse_stream(_stream_local_turn(request, context, history, tools))
     except Exception as exc:
         status, body = make_error_response(exc)
         return request.app.state._json_response(body, status)
@@ -244,139 +364,69 @@ async def socratic_tutor_stream(req: AITutorRequest, request: Request, _auth=Dep
 
 
 @router.post("/ai/multi-agent/tutor")
-async def multi_agent_tutor(req: AITutorRequest, request: Request, _auth=Depends(require_auth)):
+async def multi_agent_tutor(req: AITutorRequest, request: Request, _auth=Depends(require_ai_access)):
     try:
-        db = request.app.state.db
-        exam_bank = request.app.state.exam_bank
-        model = req.model
-        client = _get_ai_client(model)
-        message = req.message.strip()
-        if not message:
-            raise ValueError("请输入你的问题或思考。")
-
-        question_context = ""
-        if req.question_id:
-            q = exam_bank.by_id.get(req.question_id)
-            if q:
-                question_context = f"\n\n【学生正在练习的题目】\n{public_bank_question(q, include_answer=False)}"
-
-        history = []
-        conv_id = req.conversation_id
-        if conv_id:
-            convs = db.get_conversations(_auth["user_id"], 1)
-            for conv in convs:
-                if conv["id"] == int(conv_id):
-                    history = [{"role": m["role"], "content": m["content"]} for m in conv["messages"]]
-                    break
-
-        user_profile = db.get_user_profile(_auth["user_id"])
-        tool_registry = ToolRegistry(exam_bank, db, _auth["user_id"])
-
-        # Router（规则优先 + LLM fallback）
-        intent_result = classify_intent(client, model, message, question_context, history)
-        intent = intent_result.intent
-
-        # Multi-agent pipeline
-        pipeline_result = run_multi_agent_pipeline(
-            client, model, message, question_context, history,
-            user_profile, tool_registry, intent=intent,
-        )
-        reply = pipeline_result["reply"]
-
-        history.append({"role": "user", "content": message})
-        history.append({"role": "assistant", "content": reply})
-        if conv_id:
-            with db.connect() as conn:
-                conn.execute(
-                    "UPDATE ai_conversations SET messages_json = ?, updated_at = ? WHERE id = ?",
-                    (json.dumps(history, ensure_ascii=False), time.time(), int(conv_id)),
-                )
-            new_id = int(conv_id)
-        else:
-            new_id = db.save_conversation(
-                _auth["user_id"], req.question_id, "multi_agent", history,
-            )
-
-        return {
-            "conversation_id": new_id,
-            "reply": reply,
-            "model": model or "default",
-            "mode": "multi_agent_tutor",
-            "pipeline": {
-                "intent": intent,
-                "intent_confidence": intent_result.confidence,
-                **pipeline_result.get("pipeline", {}),
-            },
-        }
+        context, history, tools = _prepare_local_turn(request, req, _auth, "multi_agent")
+        return await _collect_local_turn(request, context, history, tools)
     except Exception as exc:
         status, body = make_error_response(exc)
         return request.app.state._json_response(body, status)
 
 
 @router.post("/ai/multi-agent/tutor/stream")
-async def multi_agent_tutor_stream(req: AITutorRequest, request: Request, _auth=Depends(require_auth)):
+async def multi_agent_tutor_stream(req: AITutorRequest, request: Request, _auth=Depends(require_ai_access)):
     try:
-        db = request.app.state.db
-        exam_bank = request.app.state.exam_bank
-        model = req.model
-        client = _get_ai_client(model)
-        message = req.message.strip()
-        if not message:
-            raise ValueError("请输入你的问题或思考。")
-
-        question_context = ""
-        if req.question_id:
-            q = exam_bank.by_id.get(req.question_id)
-            if q:
-                question_context = f"\n\n【学生正在练习的题目】\n{public_bank_question(q, include_answer=False)}"
-
-        history = []
-        conv_id = req.conversation_id
-        if conv_id:
-            convs = db.get_conversations(_auth["user_id"], 1)
-            for conv in convs:
-                if conv["id"] == int(conv_id):
-                    history = [{"role": m["role"], "content": m["content"]} for m in conv["messages"]]
-                    break
-
-        user_profile = db.get_user_profile(_auth["user_id"])
-        tool_registry = ToolRegistry(exam_bank, db, _auth["user_id"])
-
-        intent_result = classify_intent(client, model, message, question_context, history)
-        intent = intent_result.intent
-
-        pipeline_result = run_multi_agent_pipeline(
-            client, model, message, question_context, history,
-            user_profile, tool_registry, intent=intent,
-        )
-        reply = pipeline_result["reply"]
-
-        # 流式输出最终回复
-        def stream():
-            yield {"delta": reply}
-            # 如果是工具调用触发的，已包含最终回复
-            history.append({"role": "user", "content": message})
-            history.append({"role": "assistant", "content": reply})
-            if conv_id:
-                with db.connect() as conn:
-                    conn.execute(
-                        "UPDATE ai_conversations SET messages_json = ?, updated_at = ? WHERE id = ?",
-                        (json.dumps(history, ensure_ascii=False), time.time(), int(conv_id)),
-                    )
-            else:
-                db.save_conversation(_auth["user_id"], req.question_id, "multi_agent", history)
-
-        return sse_stream(stream())
+        context, history, tools = _prepare_local_turn(request, req, _auth, "multi_agent")
+        return sse_stream(_stream_local_turn(request, context, history, tools))
     except Exception as exc:
         status, body = make_error_response(exc)
         return request.app.state._json_response(body, status)
+
+
+@router.post("/internal/agent/tutor")
+async def service_tutor(
+    req: AgentServiceTutorRequest,
+    request: Request,
+    _service=Depends(require_agent_service),
+):
+    """Credentialed uniCloud adapter; FastAPI remains the only Agent core."""
+    context = TurnContext(
+        user_id=f"external:{req.external_user_id}",
+        message=req.message,
+        history=req.history,
+        question_context=req.question_context,
+        conversation_id=req.conversation_id,
+        question_id=req.question_id,
+        mode=req.mode,
+        model=req.model,
+        budget=_agent_budget(),
+    )
+    orchestrator = _new_orchestrator(request, req.model)
+    events = [
+        event.model_dump(mode="json")
+        async for event in orchestrator.stream(context, tool_registry=None)
+    ]
+    reply = "".join(
+        event.get("content", "") for event in events if event["type"] == "delta"
+    )
+    return {
+        "protocol": "structmind.agent.v1",
+        "events": events,
+        "reply": reply,
+        "message": reply,
+        "mode": req.mode,
+    }
 
 
 # ── 题目 AI 讲解 ──
 
 
 @router.post("/question/ai")
-async def question_ai(req: QuestionAIRequest, request: Request):
+async def question_ai(
+    req: QuestionAIRequest,
+    request: Request,
+    _auth=Depends(require_ai_access),
+):
     try:
         exam_bank = request.app.state.exam_bank
         assignment_bank = request.app.state.assignment_bank
@@ -423,7 +473,11 @@ async def question_ai(req: QuestionAIRequest, request: Request):
 
 
 @router.post("/question/ai/stream")
-async def question_ai_stream(req: QuestionAIRequest, request: Request):
+async def question_ai_stream(
+    req: QuestionAIRequest,
+    request: Request,
+    _auth=Depends(require_ai_access),
+):
     try:
         exam_bank = request.app.state.exam_bank
         assignment_bank = request.app.state.assignment_bank

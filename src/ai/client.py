@@ -25,6 +25,7 @@ from .providers import (
     ai_error_message,
     current_default_model,
     normalize_model,
+    normalize_provider,
     provider_for_model,
 )
 

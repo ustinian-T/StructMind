@@ -16,6 +16,9 @@ RUN mkdir -p runtime
 # 暴露端口
 EXPOSE 8765
 
+# 容器内必须监听全部接口，宿主机端口映射才能访问。
+ENV SM_HOST=0.0.0.0
+
 # 安全：以非root用户运行
 RUN useradd -m -s /bin/bash structmind && chown -R structmind:structmind /app
 USER structmind

@@ -36,6 +36,20 @@ from src.ai.providers import AIProviderError
 from src.db.database import PracticeDatabase
 from src.services.parser import load_question_bank, load_assignment_bank
 from src.routes import api_router
+from src.routes.ai import websocket_router
+
+
+def bootstrap_admin(db: PracticeDatabase) -> bool:
+    """Create or repair the configured administrator only with an explicit secret."""
+    if not ADMIN_PASSWORD:
+        return False
+    db.ensure_admin(
+        ADMIN_ACCOUNT,
+        ADMIN_PASSWORD,
+        "谭书宏",
+        "13800000000",
+    )
+    return True
 
 
 # ── 应用生命周期 ──
@@ -56,18 +70,11 @@ async def lifespan(app: FastAPI):
     print("初始化数据库...")
     db = PracticeDatabase(DB_PATH)
 
-    # 管理员账号
-    try:
-        admin = db.authenticate(ADMIN_ACCOUNT, ADMIN_PASSWORD)
-        if admin:
-            print(f"管理员账号已就绪: {ADMIN_ACCOUNT}")
-    except Exception:
-        pass
-    try:
-        db.create_user(ADMIN_ACCOUNT, ADMIN_PASSWORD, "谭书宏", "13800000000")
-        print(f"已创建管理员账号: {ADMIN_ACCOUNT}")
-    except ValueError:
-        pass
+    # 仅使用显式配置的密码创建或轮换管理员，永不使用内置默认密码。
+    if bootstrap_admin(db):
+        print(f"管理员账号已就绪: {ADMIN_ACCOUNT}")
+    else:
+        print("未设置 SM_ADMIN_PASSWORD，已跳过管理员自动创建/密码轮换。")
 
     app.state.exam_bank = exam_bank
     app.state.assignment_bank = assignment_bank
@@ -134,6 +141,7 @@ async def attach_state_helpers(request: Request, call_next):
 # ── API 路由 ──
 
 app.include_router(api_router)
+app.include_router(websocket_router)
 
 
 # ── 静态文件与 SPA ──

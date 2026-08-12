@@ -1,0 +1,9 @@
+{
+  "name": "api",
+  "description": "StructMind API 网关 — 桥接静态前端 REST 调用与 uniCloud 云函数",
+  "main": "index.js",
+  "dependencies": [],
+  "extensions": {
+    "uni-cloud-jql": {}
+  }
+}

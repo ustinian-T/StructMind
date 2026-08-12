@@ -103,7 +103,7 @@ export default {
     assistantAvatar: { type: String, default: '🦉' },
     scrollTop: { type: Number, default: 0 },
   },
-  emits: ['ask-example', 'send', 'update:inputValue'],
+  emits: ['ask-example', 'send', 'update:inputValue', 'update:scrollTop'],
   data() {
     return { fadeInAnimation: '' }
   },

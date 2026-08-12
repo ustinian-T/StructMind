@@ -154,6 +154,19 @@ class AITutorRequest(BaseModel):
     mode: str = "explain"
 
 
+class AgentServiceTutorRequest(BaseModel):
+    """Sanitized tutor turn forwarded by the trusted uniCloud proxy."""
+
+    external_user_id: str = Field(min_length=1, max_length=128)
+    message: str = Field(min_length=1, max_length=12_000)
+    history: list[dict[str, Any]] = Field(default_factory=list)
+    question_context: str = Field(default="", max_length=20_000)
+    conversation_id: str | int | None = None
+    question_id: str | int | None = None
+    mode: Literal["standard", "multi_agent"] = "standard"
+    model: str | None = None
+
+
 class QuestionAIRequest(BaseModel):
     question_id: int
     bank_id: str | None = None

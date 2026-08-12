@@ -2,7 +2,25 @@
   <view class="ai-page">
     <view class="page-header">
       <text class="page-title">AI 导师</text>
-      <text class="page-desc">苏格拉底式引导答疑</text>
+      <text class="page-desc">{{ tutorMode === 'multi-agent' ? '多智能体协作答疑' : '苏格拉底式引导答疑' }}</text>
+    </view>
+
+    <!-- 导师模式切换 -->
+    <view class="mode-switch-bar">
+      <view
+        class="mode-switch-item"
+        :class="{ active: tutorMode === 'standard' }"
+        @tap="switchMode('standard')"
+      >
+        <text>标准导师</text>
+      </view>
+      <view
+        class="mode-switch-item"
+        :class="{ active: tutorMode === 'multi-agent' }"
+        @tap="switchMode('multi-agent')"
+      >
+        <text>多智能体</text>
+      </view>
     </view>
 
     <!-- 对话区域使用 SmChat 组件 -->
@@ -31,7 +49,7 @@
 
     <!-- 对话状态 -->
     <view class="conv-status" v-if="conversationId">
-      <text>对话 #{{ conversationId }}</text>
+      <text>对话 #{{ conversationId }}{{ tutorMode === 'multi-agent' ? '  · 多智能体模式' : '' }}</text>
     </view>
 
     <SmToast :visible="toastVisible" :message="toastMsg" :type="toastType" @close="toastVisible = false" />
@@ -41,17 +59,19 @@
 <script>
 import SmChat from '@/components/SmChat.vue'
 import SmToast from '@/components/SmToast.vue'
-// getApp() 是 uni-app 全局函数，无需导入
+import { callCloud } from '@/utils/cloud.js'
 
 export default {
   components: { SmChat, SmToast },
   data() {
     return {
-      messages: [],
+      messages: Array(),
       userInput: '',
       streaming: false,
       streamContent: '',
+      streamConvId: null,
       conversationId: null,
+      tutorMode: 'standard',   // 'standard' | 'multi-agent'
       toastVisible: false,
       toastMsg: '',
       toastType: 'info',
@@ -64,6 +84,15 @@ export default {
     }
   },
   methods: {
+    switchMode(mode) {
+      if (mode === this.tutorMode) return
+      this.tutorMode = mode
+      // Reset conversation when switching modes
+      this.messages = []
+      this.conversationId = null
+      this.streamContent = ''
+      this.streaming = false
+    },
     askExample(question) {
       this.userInput = question
       this.sendMessage()
@@ -84,29 +113,41 @@ export default {
 
       const app = getApp()
       const auth = app.globalData
-      const apiBase = app.globalData.apiBase || 'https://datastytest.tshai.top'
 
       try {
-        const res = await uni.request({
-          url: `${apiBase}/api/ai/tutor`,
-          method: 'POST',
-          header: auth.token ? { Authorization: `Bearer ${auth.token}` } : {},
-          data: {
-            message: msg,
-            conversation_id: this.conversationId,
-          },
+        const data = await callCloud('structmind-ai', 'tutor', {
+          token: auth.token,
+          message: msg,
+          conversation_id: this.conversationId,
+          mode: this.tutorMode,
         })
-        const data = res.data
-        this.messages.push({ role: 'assistant', content: data.reply })
-        this.conversationId = data.conversation_id
+        const events = Array.isArray(data.events) ? data.events : []
+        let reply = ''
+        events.forEach((event) => {
+          if (event.protocol !== 'structmind.agent.v1') return
+          if (event.type === 'delta' && event.content) {
+            reply += event.content
+            this.streamContent = reply
+          }
+          if (event.type === 'done' && event.conversation_id) {
+            this.streamConvId = event.conversation_id
+          }
+          if (event.type === 'error') {
+            throw new Error(event.message || 'Agent执行失败')
+          }
+        })
+        this.messages.push({ role: 'assistant', content: reply || data.message || '暂未获得回复' })
+        this.conversationId = data.conversation_id || this.streamConvId
       } catch (err) {
         this.messages.push({ role: 'assistant', content: '抱歉，AI服务暂时不可用。请检查API配置或网络连接。' })
         this.showToast('AI服务暂不可用', 'error')
       } finally {
         this.streaming = false
         this.streamContent = ''
+        this.streamConvId = null
       }
     },
+
     showToast(msg, type = 'info') {
       this.toastMsg = msg
       this.toastType = type
@@ -130,6 +171,21 @@ export default {
 }
 .page-title { font-size: 20px; font-weight: 700; color: #1a2b28; display: block; }
 .page-desc { font-size: 13px; color: #6b8280; margin-top: 2px; display: block; }
+
+/* Mode Switch Bar */
+.mode-switch-bar {
+  display: flex; margin: 10px 16px 0; background: #fff;
+  border-radius: 14px; border: 1px solid #edf2f0; overflow: hidden;
+}
+.mode-switch-item {
+  flex: 1; padding: 10px 0; text-align: center; font-size: 14px;
+  font-weight: 500; color: #6b8280; transition: all 0.2s;
+}
+.mode-switch-item.active {
+  background: linear-gradient(135deg, #2d8a7b, #47b5a3); color: #fff;
+  font-weight: 600;
+}
+
 .new-chat-btn {
   padding: 6px 12px; border-radius: 16px; background: #f5f8f7;
   border: 1px solid #dce5e3; margin-right: 8px;

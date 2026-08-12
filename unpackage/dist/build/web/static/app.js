@@ -28,10 +28,11 @@ const S = {
 };
 
 // ═══ API ═══
+const API_BASE = 'https://fc-mp-d74eb953-b479-43d3-9fda-e3524a6ad7e1.next.bspapp.com';
 async function api(path, opts={}) {
   const headers = { 'Content-Type': 'application/json', ...(opts.headers||{}) };
   if (S.token) headers['Authorization'] = `Bearer ${S.token}`;
-  const res = await fetch(path, { ...opts, headers });
+  const res = await fetch(API_BASE + path, { ...opts, headers });
   const data = await res.json().catch(()=>({}));
   if (!res.ok) throw new Error(data.error || `请求失败: ${res.status}`);
   return data;
@@ -40,7 +41,7 @@ async function api(path, opts={}) {
 async function streamApi(path, payload, onEvent) {
   const headers = { 'Content-Type': 'application/json' };
   if (S.token) headers['Authorization'] = `Bearer ${S.token}`;
-  const res = await fetch(path, { method:'POST', headers, body: JSON.stringify(payload) });
+  const res = await fetch(API_BASE + path, { method:'POST', headers, body: JSON.stringify(payload) });
   if (!res.ok) { const d = await res.json().catch(()=>({})); throw new Error(d.error||`请求失败`); }
   if (!res.body) throw new Error('浏览器不支持流式读取');
   const reader = res.body.getReader(), decoder = new TextDecoder('utf-8');
@@ -390,7 +391,7 @@ function renderAI() {
           </div>
         </div>`:''}
         ${S.tutorMessages.map(m=>`<div class="chat-msg ${m.role}"><div class="chat-avatar">${m.role==='user'?'👤':'🦉'}</div><div class="chat-bubble">${renderRich(m.content)}</div></div>`).join('')}
-        ${S.tutorLoading?`<div class="chat-msg assistant"><div class="chat-avatar">🦉</div><div class="chat-bubble"><span class="skeleton" style="display:inline-block;width:60%;height:14px"></span></div></div>`:''}
+        ${S.tutorLoading?`<div class="chat-msg assistant"><div class="chat-avatar">🦉</div><div class="chat-bubble">${S.tutorStreamContent?renderRich(S.tutorStreamContent)+'<span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>':'<span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>'}</div></div>`:''}
       </div>
       <div class="chat-input-row">
         <input class="chat-input" id="tutorInput" placeholder="输入你的问题或思考..."/>
@@ -819,21 +820,48 @@ function updateWsIndicator() {
 async function sendTutorMsg() {
   const input = document.querySelector('#tutorInput'); if (!input) return;
   const msg = input.value.trim(); if (!msg||S.tutorLoading) return;
-  input.value = ''; S.tutorMessages.push({role:'user',content:msg}); S.tutorLoading=true; render();
+  input.value = ''; S.tutorMessages.push({role:'user',content:msg}); S.tutorLoading=true; S.tutorStreamContent=''; render();
 
   // Try WebSocket first for streaming
   if (S.wsConnected && sendViaWebSocket(msg)) {
-    // Response streams in via ws.onmessage above
     setTimeout(()=>{const c=document.querySelector('#tutorChat');if(c)c.scrollTop=c.scrollHeight;},100);
     return;
   }
 
-  // Fall back to REST API
+  // Try SSE streaming via streamApi
+  let streamContent = '';
   try {
-    const d = await api('/api/ai/tutor',{method:'POST',body:JSON.stringify({message:msg,conversation_id:S.tutorConvId})});
-    S.tutorMessages.push({role:'assistant',content:d.reply}); S.tutorConvId = d.conversation_id;
-  } catch(e) { S.tutorMessages.push({role:'assistant',content:'抱歉，AI服务暂时不可用。请检查API配置。'}); }
-  finally { S.tutorLoading=false; render(); setTimeout(()=>{const c=document.querySelector('#tutorChat');if(c)c.scrollTop=c.scrollHeight;},100); }
+    await streamApi('/api/ai/tutor/stream', {message:msg, conversation_id:S.tutorConvId}, (e) => {
+      if (e.type === 'delta' && e.content) {
+        streamContent += e.content;
+        S.tutorStreamContent = streamContent;
+        // Update chat bubble in real-time for smooth streaming display
+        const chatArea = document.querySelector('#tutorChat');
+        if (chatArea) {
+          const loadingBubble = chatArea.querySelector('.chat-msg.assistant:last-of-type .chat-bubble');
+          if (loadingBubble) {
+            loadingBubble.innerHTML = renderRich(streamContent) + '<span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>';
+            chatArea.scrollTop = chatArea.scrollHeight;
+          }
+        }
+      } else if (e.type === 'done') {
+        S.tutorConvId = e.conversation_id || S.tutorConvId;
+      }
+    });
+    // Finalize: push complete message to history
+    if (streamContent) {
+      S.tutorMessages.push({role:'assistant',content:streamContent});
+    }
+  } catch(e) {
+    // SSE stream failed, fall back to REST API
+    try {
+      const d = await api('/api/ai/tutor',{method:'POST',body:JSON.stringify({message:msg,conversation_id:S.tutorConvId})});
+      S.tutorMessages.push({role:'assistant',content:d.reply}); S.tutorConvId = d.conversation_id;
+    } catch(e2) { S.tutorMessages.push({role:'assistant',content:'抱歉，AI服务暂时不可用。请检查API配置。'}); }
+  } finally {
+    S.tutorLoading=false; S.tutorStreamContent=''; render();
+    setTimeout(()=>{const c=document.querySelector('#tutorChat');if(c)c.scrollTop=c.scrollHeight;},100);
+  }
 }
 
 // ═══ Question AI Modal ═══

@@ -18,6 +18,7 @@
       "title": "用户ID",
       "foreignKey": "structmind_users._id"
     },
-    "created_at": { "bsonType": "timestamp" }
+    "created_at": { "bsonType": "timestamp" },
+    "expires_at": { "bsonType": "timestamp" }
   }
 }

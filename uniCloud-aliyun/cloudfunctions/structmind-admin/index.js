@@ -1,3 +1,4 @@
+// @ts-nocheck
 'use strict';
 
 /**
@@ -7,21 +8,27 @@
 const db = uniCloud.database();
 const usersCollection = db.collection('structmind_users');
 const sessionsCollection = db.collection('structmind_sessions');
+const SESSION_MAX_AGE_MS = Number(process.env.SM_SESSION_MAX_AGE_MS) || 7 * 24 * 60 * 60 * 1000;
 
 // 验证管理员身份
 async function requireAdmin(token) {
   if (!token) throw { code: 401, message: '请先登录' };
   const sessionResult = await sessionsCollection.where({ token }).get();
   if (sessionResult.data.length === 0) throw { code: 401, message: '登录已过期' };
-  const userResult = await usersCollection.doc(sessionResult.data[0].user_id).get();
-  if (userResult.data.length === 0 || userResult.data[0].role !== 'admin') {
+  const session = sessionResult.data[0];
+  if ((session.expires_at || session.created_at + SESSION_MAX_AGE_MS) <= Date.now()) {
+    await sessionsCollection.where({ token }).remove();
+    throw { code: 401, message: '登录已过期' };
+  }
+  const userResult = await usersCollection.doc(session.user_id).get();
+  if (userResult.data.length === 0 || userResult.data[0].role !== 'admin' || userResult.data[0].status !== 'approved') {
     throw { code: 403, message: '仅管理员可执行此操作' };
   }
   return userResult.data[0];
 }
 
 exports.main = async (event, context) => {
-  const { action, params } = event;
+  const { action, params = {} } = event || {};
   try {
     // 验证管理员
     await requireAdmin(params.token);

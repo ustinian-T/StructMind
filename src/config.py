@@ -22,6 +22,13 @@ ZHIPU_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
 DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
 AI_TIMEOUT_SECONDS = 120
 AI_MAX_RETRIES = 2
+AI_RATE_LIMIT_WINDOW = int(os.environ.get("SM_AI_RATE_LIMIT_WINDOW", "60"))
+AI_RATE_LIMIT_MAX_REQUESTS = int(os.environ.get("SM_AI_RATE_LIMIT_MAX", "20"))
+AGENT_MAX_TOOL_ROUNDS = int(os.environ.get("SM_AGENT_MAX_TOOL_ROUNDS", "2"))
+AGENT_MAX_OUTPUT_TOKENS = int(os.environ.get("SM_AGENT_MAX_OUTPUT_TOKENS", "1200"))
+AGENT_TIMEOUT_SECONDS = float(os.environ.get("SM_AGENT_TIMEOUT_SECONDS", "45"))
+AGENT_MAX_HISTORY_MESSAGES = int(os.environ.get("SM_AGENT_MAX_HISTORY_MESSAGES", "12"))
+AGENT_SERVICE_KEY = os.environ.get("SM_AGENT_SERVICE_KEY", "")
 
 AI_PROVIDERS: dict[str, dict] = {
     "zhipu": {
@@ -52,7 +59,7 @@ RUNTIME_CONFIG: dict = {
 
 # ── 管理员 ──
 ADMIN_ACCOUNT = os.environ.get("SM_ADMIN_ACCOUNT", "tanshuhong")
-ADMIN_PASSWORD = os.environ.get("SM_ADMIN_PASSWORD", "XX05020604")
+ADMIN_PASSWORD = os.environ.get("SM_ADMIN_PASSWORD")
 
 # ── 速率限制 ──
 RATE_LIMIT_WINDOW = 60

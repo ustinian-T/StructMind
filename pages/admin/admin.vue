@@ -69,13 +69,14 @@
 </template>
 
 <script>
+import { callCloud, getErrorMessage } from '@/utils/cloud.js'
 // getApp() 是 uni-app 全局函数，无需导入
 
 export default {
   data() {
     return {
-      pendingUsers: [],
-      allUsers: [],
+      pendingUsers: Array(),
+      allUsers: Array(),
       approvedCount: 0,
       loading: true,
       errorMsg: '',
@@ -90,26 +91,17 @@ export default {
       try {
         const app = getApp()
         const auth = app.globalData
-        const apiBase = app.globalData.apiBase || 'https://datastytest.tshai.top'
-
-        const [pendingRes, allRes] = await Promise.all([
-          uni.request({
-            url: `${apiBase}/api/admin/pending`,
-            method: 'GET',
-            header: { Authorization: `Bearer ${auth.token}` },
-          }),
-          uni.request({
-            url: `${apiBase}/api/admin/users`,
-            method: 'GET',
-            header: { Authorization: `Bearer ${auth.token}` },
-          }),
+        const [pendingData, allData] = await Promise.all([
+          callCloud('structmind-admin', 'pending', { token: auth.token }),
+          callCloud('structmind-admin', 'users', { token: auth.token }),
         ])
 
-        this.pendingUsers = pendingRes.data?.users || []
-        this.allUsers = allRes.data?.users || []
+        const normalizeUser = user => ({ ...user, id: user.id || user._id })
+        this.pendingUsers = (pendingData.users || []).map(normalizeUser)
+        this.allUsers = (allData.users || []).map(normalizeUser)
         this.approvedCount = this.allUsers.filter(u => u.status === 'approved').length
       } catch (err) {
-        this.errorMsg = err.data?.error || '加载失败'
+        this.errorMsg = getErrorMessage(err, '加载失败')
       } finally {
         this.loading = false
       }
@@ -119,24 +111,22 @@ export default {
       try {
         const app = getApp()
         const auth = app.globalData
-        const apiBase = app.globalData.apiBase || 'https://datastytest.tshai.top'
-
-        await uni.request({
-          url: `${apiBase}/api/admin/approve`,
-          method: 'POST',
-          header: { Authorization: `Bearer ${auth.token}` },
-          data: { user_id: userId, approved },
+        await callCloud('structmind-admin', 'approve', {
+          token: auth.token,
+          user_id: userId,
+          approved,
         })
 
         await this.loadUsers()
         uni.showToast({ title: approved ? '已通过' : '已拒绝', icon: 'success' })
       } catch (err) {
-        uni.showToast({ title: err.data?.error || '操作失败', icon: 'error' })
+        uni.showToast({ title: getErrorMessage(err, '操作失败'), icon: 'none' })
       }
     },
 
     formatTime(ts) {
-      const d = new Date(ts * 1000)
+      const value = Number(ts || 0)
+      const d = new Date(value > 100000000000 ? value : value * 1000)
       return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
     },
   },

@@ -1,20 +1,18 @@
 <script setup lang="uts">
+	defineOptions({
+		globalData: {
+			token: null as string | null,
+			user: null as UTSJSONObject | null
+		}
+	})
+
 	// #ifdef APP-ANDROID || APP-HARMONY
 	let firstBackTime = 0
 	// #endif
 
-	const API_BASE = 'https://datastytest.tshai.top'
-
-	// 在 onLaunch 中初始化 globalData，确保 getApp() 可用
 	onLaunch(() => {
 		console.log('StructMind App Launch')
-
-		// 初始化 globalData
-		const g = getApp().globalData || {}
-		if (!g.apiBase) g.apiBase = API_BASE
-		if (!g.token) g.token = null
-		if (!g.user) g.user = null
-		getApp().globalData = g
+		const g = getApp().globalData
 
 		// 恢复登录状态
 		const saved = uni.getStorageSync('auth')
@@ -53,10 +51,6 @@
 	onExit(() => { console.log('StructMind App Exit') })
 	// #endif
 </script>
-
-<template>
-	<view></view>
-</template>
 
 <style>
 	:root {
