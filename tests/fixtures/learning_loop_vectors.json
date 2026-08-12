@@ -1,0 +1,295 @@
+{
+  "rule_version": "learning-loop-v1",
+  "mastery": [
+    {
+      "name": "primary correct from neutral",
+      "input": {
+        "concept": "二叉树遍历",
+        "role": "primary",
+        "weight": 1.0,
+        "current": {"mastery_score": 0.5, "total_attempts": 0, "correct_attempts": 0},
+        "is_correct": true,
+        "consecutive_correct": 0
+      },
+      "expected": {
+        "concept": "二叉树遍历",
+        "role": "primary",
+        "weight": 1.0,
+        "before_score": 0.5,
+        "after_score": 0.65,
+        "delta": 0.15,
+        "alpha": 0.3,
+        "total_attempts": 1,
+        "correct_attempts": 1,
+        "rule_version": "learning-loop-v1"
+      }
+    },
+    {
+      "name": "weighted primary incorrect",
+      "input": {
+        "concept": "图的遍历",
+        "role": "primary",
+        "weight": 0.7,
+        "current": {"mastery_score": 0.8, "total_attempts": 4, "correct_attempts": 3},
+        "is_correct": false,
+        "consecutive_correct": 0
+      },
+      "expected": {
+        "concept": "图的遍历",
+        "role": "primary",
+        "weight": 0.7,
+        "before_score": 0.8,
+        "after_score": 0.632,
+        "delta": -0.168,
+        "alpha": 0.3,
+        "total_attempts": 5,
+        "correct_attempts": 3,
+        "rule_version": "learning-loop-v1"
+      }
+    },
+    {
+      "name": "weighted secondary correct",
+      "input": {
+        "concept": "递归",
+        "role": "secondary",
+        "weight": 0.15,
+        "current": {"mastery_score": 0.4, "total_attempts": 2, "correct_attempts": 1},
+        "is_correct": true,
+        "consecutive_correct": 1
+      },
+      "expected": {
+        "concept": "递归",
+        "role": "secondary",
+        "weight": 0.15,
+        "before_score": 0.4,
+        "after_score": 0.427,
+        "delta": 0.027,
+        "alpha": 0.3,
+        "total_attempts": 3,
+        "correct_attempts": 2,
+        "rule_version": "learning-loop-v1"
+      }
+    }
+  ],
+  "reviews": [
+    {
+      "name": "first incorrect enters relearning",
+      "input": {
+        "current": {"stability": 1.0, "difficulty": 0.3, "review_state": "new", "total_attempts": 0},
+        "is_correct": false,
+        "weight": 1.0,
+        "evaluated_at": "2026-08-12T00:00:00Z",
+        "feedback": null
+      },
+      "expected": {
+        "before_stability": 1.0,
+        "after_stability": 0.5,
+        "before_difficulty": 0.3,
+        "after_difficulty": 0.5,
+        "review_state": "relearning",
+        "interval_days": 1,
+        "next_review_at": "2026-08-13T00:00:00Z",
+        "rule_version": "learning-loop-v1"
+      }
+    },
+    {
+      "name": "first correct stays within three days",
+      "input": {
+        "current": {"stability": 1.0, "difficulty": 0.3, "review_state": "new", "total_attempts": 0},
+        "is_correct": true,
+        "weight": 1.0,
+        "evaluated_at": "2026-08-12T00:00:00Z",
+        "feedback": null
+      },
+      "expected": {
+        "before_stability": 1.0,
+        "after_stability": 1.4,
+        "before_difficulty": 0.3,
+        "after_difficulty": 0.2,
+        "review_state": "learning",
+        "interval_days": 3,
+        "next_review_at": "2026-08-15T00:00:00Z",
+        "rule_version": "learning-loop-v1"
+      }
+    },
+    {
+      "name": "established correct review extends interval",
+      "input": {
+        "current": {"stability": 2.0, "difficulty": 0.4, "review_state": "review", "total_attempts": 5},
+        "is_correct": true,
+        "weight": 1.0,
+        "evaluated_at": "2026-08-12T00:00:00Z",
+        "feedback": "too_easy"
+      },
+      "expected": {
+        "before_stability": 2.0,
+        "after_stability": 2.7,
+        "before_difficulty": 0.4,
+        "after_difficulty": 0.3,
+        "review_state": "review",
+        "interval_days": 19,
+        "next_review_at": "2026-08-31T00:00:00Z",
+        "rule_version": "learning-loop-v1"
+      }
+    }
+  ],
+  "errors": [
+    {
+      "name": "format-only mismatch",
+      "input": {
+        "is_correct": false,
+        "qtype": "填空题",
+        "user_answer": "n ( n + 1 ) / 2",
+        "correct_answer": "n(n+1)/2",
+        "time_spent_seconds": 22,
+        "mastery_score": 0.72
+      },
+      "expected": {
+        "category": "answer_format",
+        "subcategory": "equivalent_after_compaction",
+        "confidence": 0.95,
+        "evidence": ["compact_answers_match"],
+        "source": "rule",
+        "rule_version": "learning-loop-v1"
+      }
+    },
+    {
+      "name": "very fast wrong answer is guessing",
+      "input": {
+        "is_correct": false,
+        "qtype": "单选题",
+        "user_answer": "A",
+        "correct_answer": "D",
+        "time_spent_seconds": 2,
+        "mastery_score": 0.6
+      },
+      "expected": {
+        "category": "guessing",
+        "subcategory": "very_short_response_time",
+        "confidence": 0.8,
+        "evidence": ["time_spent_seconds<=3"],
+        "source": "rule",
+        "rule_version": "learning-loop-v1"
+      }
+    },
+    {
+      "name": "insufficient evidence stays explicit",
+      "input": {
+        "is_correct": false,
+        "qtype": "单选题",
+        "user_answer": "B",
+        "correct_answer": "C",
+        "time_spent_seconds": 30,
+        "mastery_score": 0.55
+      },
+      "expected": {
+        "category": "unclassified",
+        "subcategory": "insufficient_evidence",
+        "confidence": 0.3,
+        "evidence": ["no_specific_rule_matched"],
+        "source": "rule",
+        "rule_version": "learning-loop-v1"
+      }
+    }
+  ],
+  "recommendations": [
+    {
+      "name": "stable tie uses question id",
+      "input": {
+        "candidates": [
+          {"question_id": 9, "concepts": ["栈"], "mastery_score": 0.5, "due_days": 0, "recent_exposures": 0},
+          {"question_id": 3, "concepts": ["栈"], "mastery_score": 0.5, "due_days": 0, "recent_exposures": 0}
+        ],
+        "context": {"recent_error_concepts": [], "plan_concepts": [], "exam_days_remaining": null},
+        "limit": 2
+      },
+      "expected_question_ids": [3, 9]
+    },
+    {
+      "name": "overdue weak error target wins",
+      "input": {
+        "candidates": [
+          {"question_id": 1, "concepts": ["队列"], "mastery_score": 0.75, "due_days": 0, "recent_exposures": 0},
+          {"question_id": 2, "concepts": ["二叉树遍历"], "mastery_score": 0.35, "due_days": 2, "recent_exposures": 1}
+        ],
+        "context": {"recent_error_concepts": ["二叉树遍历"], "plan_concepts": ["二叉树遍历"], "exam_days_remaining": 5},
+        "limit": 1
+      },
+      "expected_question_ids": [2]
+    }
+  ],
+  "plans": [
+    {
+      "name": "daily tasks respect twenty minute budget",
+      "input": {
+        "exam_date": "2026-08-14",
+        "daily_minutes": 20,
+        "timezone": "Asia/Shanghai",
+        "evaluated_at": "2026-08-12T00:00:00Z",
+        "due_reviews": [{"concept": "栈", "estimated_minutes": 8}],
+        "weak_concepts": [{"concept": "队列", "mastery_score": 0.4, "estimated_minutes": 12}]
+      },
+      "expected": {
+        "status": "active",
+        "exam_date": "2026-08-14",
+        "daily_minutes": 20,
+        "timezone": "Asia/Shanghai",
+        "total_days": 2,
+        "days": [
+          {
+            "date": "2026-08-12",
+            "estimated_minutes": 20,
+            "tasks": [
+              {"type": "due_review", "concept": "栈", "estimated_minutes": 8, "reason": "该知识点已到复习时间"},
+              {"type": "weakness_repair", "concept": "队列", "estimated_minutes": 12, "reason": "优先补强低掌握度知识点"}
+            ]
+          },
+          {"date": "2026-08-13", "estimated_minutes": 0, "tasks": []}
+        ],
+        "rule_version": "learning-loop-v1"
+      }
+    },
+    {
+      "name": "past exam is expired",
+      "input": {
+        "exam_date": "2026-08-11",
+        "daily_minutes": 30,
+        "timezone": "UTC",
+        "evaluated_at": "2026-08-12T00:00:00Z",
+        "due_reviews": [],
+        "weak_concepts": []
+      },
+      "expected": {
+        "status": "expired",
+        "exam_date": "2026-08-11",
+        "daily_minutes": 30,
+        "timezone": "UTC",
+        "total_days": 0,
+        "days": [],
+        "rule_version": "learning-loop-v1"
+      }
+    }
+  ],
+  "summaries": [
+    {
+      "name": "rule summary separates student understanding and tutor hints",
+      "input": {
+        "messages": [
+          {"id": "m1", "role": "user", "content": "我理解栈是后进先出，但递归为什么需要栈？"},
+          {"id": "m2", "role": "assistant", "content": "可以观察每次函数调用需要保存返回地址和局部变量。"}
+        ],
+        "known_concepts": ["栈", "递归"]
+      },
+      "expected": {
+        "concepts": ["栈", "递归"],
+        "student_understanding": [{"text": "我理解栈是后进先出，但递归为什么需要栈？", "message_id": "m1"}],
+        "misconceptions": [],
+        "unresolved_questions": [{"text": "我理解栈是后进先出，但递归为什么需要栈？", "message_id": "m1"}],
+        "key_hints": [{"text": "可以观察每次函数调用需要保存返回地址和局部变量。", "message_id": "m2"}],
+        "next_actions": ["复习栈与递归调用帧的关系"],
+        "generation_method": "rule",
+        "rule_version": "learning-loop-v1"
+      }
+    }
+  ]
+}
