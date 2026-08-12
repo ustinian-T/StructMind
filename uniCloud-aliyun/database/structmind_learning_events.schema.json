@@ -1,0 +1,13 @@
+{
+  "bsonType": "object",
+  "required": ["user_id", "attempt_token", "status", "question_id", "rule_version", "created_at", "updated_at"],
+  "permission": {"read": "doc.user_id === auth.uid || auth.role.includes('admin')", "create": "auth.uid != null", "update": "doc.user_id === auth.uid || auth.role.includes('admin')", "delete": false},
+  "properties": {
+    "_id": {"description": "学习事件ID"}, "user_id": {"bsonType": "string"},
+    "attempt_token": {"bsonType": "string", "description": "与user_id组合后必须唯一"},
+    "question_id": {"bsonType": "string"}, "session_id": {"bsonType": "string"},
+    "status": {"bsonType": "string", "enum": ["pending", "committed"]},
+    "draft": {"bsonType": "object"}, "outcome": {"bsonType": "object"}, "response": {"bsonType": "object"},
+    "rule_version": {"bsonType": "string"}, "created_at": {"bsonType": "timestamp"}, "updated_at": {"bsonType": "timestamp"}
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "bsonType": "object", "required": ["user_id", "learning_event_id", "concept", "before_score", "after_score", "delta", "rule_version", "created_at"],
+  "permission": {"read": "doc.user_id === auth.uid || auth.role.includes('admin')", "create": "auth.uid != null", "update": false, "delete": false},
+  "properties": {"_id": {}, "user_id": {"bsonType": "string"}, "learning_event_id": {"bsonType": "string"}, "concept": {"bsonType": "string"}, "role": {"bsonType": "string"}, "weight": {"bsonType": "double"}, "before_score": {"bsonType": "double"}, "after_score": {"bsonType": "double"}, "delta": {"bsonType": "double"}, "review": {"bsonType": "object"}, "rule_version": {"bsonType": "string"}, "created_at": {"bsonType": "timestamp"}}
+}

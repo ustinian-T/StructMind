@@ -1,0 +1,5 @@
+{
+  "bsonType": "object", "required": ["user_id", "concept", "feedback", "next_review_at", "created_at", "updated_at"],
+  "permission": {"read": "doc.user_id === auth.uid || auth.role.includes('admin')", "create": "auth.uid != null", "update": "doc.user_id === auth.uid || auth.role.includes('admin')", "delete": false},
+  "properties": {"_id": {}, "user_id": {"bsonType": "string"}, "concept": {"bsonType": "string"}, "learning_event_id": {"bsonType": "string"}, "feedback": {"bsonType": "string", "enum": ["too_easy", "just_right", "too_hard"]}, "reviewed_at": {"bsonType": "timestamp"}, "next_review_at": {"bsonType": "timestamp"}, "created_at": {"bsonType": "timestamp"}, "updated_at": {"bsonType": "timestamp"}}
+}

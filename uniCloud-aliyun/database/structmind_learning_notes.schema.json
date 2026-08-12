@@ -1,0 +1,5 @@
+{
+  "bsonType": "object", "required": ["user_id", "title", "source_type", "created_at", "updated_at"],
+  "permission": {"read": "doc.user_id === auth.uid || auth.role.includes('admin')", "create": "auth.uid != null", "update": "doc.user_id === auth.uid || auth.role.includes('admin')", "delete": "doc.user_id === auth.uid || auth.role.includes('admin')"},
+  "properties": {"_id": {}, "user_id": {"bsonType": "string"}, "title": {"bsonType": "string"}, "auto_content": {"bsonType": "object"}, "user_content": {"bsonType": "string"}, "tags": {"bsonType": "array"}, "source_type": {"bsonType": "string"}, "source_id": {"bsonType": "string"}, "concept": {"bsonType": "string"}, "error_category": {"bsonType": "string"}, "is_pinned": {"bsonType": "bool"}, "is_archived": {"bsonType": "bool"}, "created_at": {"bsonType": "timestamp"}, "updated_at": {"bsonType": "timestamp"}}
+}

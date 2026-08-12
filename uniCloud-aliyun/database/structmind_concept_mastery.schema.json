@@ -1,0 +1,5 @@
+{
+  "bsonType": "object", "required": ["user_id", "concept", "mastery_score", "rule_version", "created_at", "updated_at"],
+  "permission": {"read": "doc.user_id === auth.uid || auth.role.includes('admin')", "create": "auth.uid != null", "update": "doc.user_id === auth.uid || auth.role.includes('admin')", "delete": false},
+  "properties": {"_id": {}, "user_id": {"bsonType": "string"}, "concept": {"bsonType": "string"}, "mastery_score": {"bsonType": "double"}, "total_attempts": {"bsonType": "int"}, "correct_attempts": {"bsonType": "int"}, "stability": {"bsonType": "double"}, "difficulty": {"bsonType": "double"}, "review_state": {"bsonType": "string"}, "last_review_at": {"bsonType": "timestamp"}, "next_review_at": {"bsonType": "timestamp"}, "last_learning_event_id": {"bsonType": "string"}, "rule_version": {"bsonType": "string"}, "created_at": {"bsonType": "timestamp"}, "updated_at": {"bsonType": "timestamp"}}
+}

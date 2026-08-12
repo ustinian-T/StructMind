@@ -1,0 +1,5 @@
+{
+  "bsonType": "object", "required": ["user_id", "learning_event_id", "selected_question_id", "score_breakdown", "explanation", "rule_version", "created_at", "updated_at"],
+  "permission": {"read": "doc.user_id === auth.uid || auth.role.includes('admin')", "create": "auth.uid != null", "update": false, "delete": false},
+  "properties": {"_id": {}, "user_id": {"bsonType": "string"}, "learning_event_id": {"bsonType": "string"}, "selected_question_id": {"bsonType": "string"}, "recommendation_type": {"bsonType": "string"}, "score_breakdown": {"bsonType": "object"}, "evidence_refs": {"bsonType": "array"}, "explanation": {"bsonType": "string"}, "total_score": {"bsonType": "double"}, "rule_version": {"bsonType": "string"}, "created_at": {"bsonType": "timestamp"}, "updated_at": {"bsonType": "timestamp"}}
+}

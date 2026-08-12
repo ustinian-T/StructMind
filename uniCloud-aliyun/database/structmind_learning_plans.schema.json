@@ -1,6 +1,6 @@
 {
   "bsonType": "object",
-  "required": ["user_id", "title", "chapters"],
+  "required": ["user_id", "title", "chapters", "exam_date", "daily_minutes", "timezone", "version", "status", "plan_data"],
   "permission": {
     "read": "doc.user_id === auth.uid || auth.role.includes('admin')",
     "create": "auth.uid != null",
@@ -26,6 +26,11 @@
       "title": "计划描述",
       "maxLength": 500
     },
+    "exam_date": {"bsonType": "string", "title": "考试日期", "description": "YYYY-MM-DD"},
+    "daily_minutes": {"bsonType": "int", "title": "每日学习分钟", "minimum": 10, "maximum": 480},
+    "timezone": {"bsonType": "string", "title": "IANA时区"},
+    "version": {"bsonType": "int", "title": "计划版本", "minimum": 1},
+    "plan_data": {"bsonType": "object", "title": "不可变计划快照"},
     "goal": {
       "bsonType": "object",
       "title": "学习目标",
@@ -108,7 +113,7 @@
     "status": {
       "bsonType": "string",
       "title": "计划状态",
-      "enum": ["active", "paused", "completed", "abandoned"],
+      "enum": ["active", "superseded", "expired", "paused", "completed", "abandoned"],
       "defaultValue": "active"
     },
     "start_date": {
