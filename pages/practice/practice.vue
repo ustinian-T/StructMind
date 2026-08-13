@@ -117,6 +117,21 @@
           <text class="result-label">解析</text>
           <text class="result-value">{{ answerResult.analysis }}</text>
         </view>
+        <view class="learning-proof" v-if="answerResult.learning_event_id">
+          <text class="proof-title">本题学习轨迹</text>
+          <view class="mastery-row" v-for="change in (answerResult.mastery_changes || [])" :key="change.concept">
+            <text>{{ change.concept }}</text>
+            <text>{{ percent(change.before_score) }} → {{ percent(change.after_score) }}（{{ signedPercent(change.delta) }}）</text>
+          </view>
+          <text class="proof-line" v-if="answerResult.error_reason">错因：{{ errorReasonText(answerResult.error_reason) }}</text>
+          <text class="proof-line" v-if="answerResult.review_updates && answerResult.review_updates[0]">下次复习：{{ formatTime(answerResult.review_updates[0].next_review_at) }}</text>
+          <view class="recommend-proof" v-if="answerResult.next_recommendation">
+            <text class="proof-title">为什么推荐下一题</text>
+            <text class="proof-line">{{ answerResult.next_recommendation.explanation }}</text>
+            <text class="proof-line">规则基础结果 · 事件 {{ answerResult.learning_event_id }}</text>
+            <SmButton variant="primary" block @click="startNextRecommendation">开始推荐题</SmButton>
+          </view>
+        </view>
       </view>
 
       <!-- Navigation (bottom of answer panel) -->
@@ -258,6 +273,8 @@ export default {
       userAnswer: '',
       userAnswerArr: Array(),
       answerResult: null,
+      attemptTokens: Object.create(null),
+      questionStartedAt: Date.now(),
       submitting: false,
       toastVisible: false,
       toastMsg: '',
@@ -359,6 +376,7 @@ export default {
       this.userAnswerArr = []
       this.answerResult = null
       this.submitting = false
+      this.questionStartedAt = Date.now()
     },
     exitAnswer() {
       // Sync the currentIndex for swipe mode
@@ -376,6 +394,7 @@ export default {
         this.userAnswer = ''
         this.userAnswerArr = []
         this.answerResult = null
+        this.questionStartedAt = Date.now()
       }
     },
     nextAnswerQ() {
@@ -384,6 +403,7 @@ export default {
         this.userAnswer = ''
         this.userAnswerArr = []
         this.answerResult = null
+        this.questionStartedAt = Date.now()
       }
     },
     isOptionSelected(key) {
@@ -423,6 +443,10 @@ export default {
 
       const app = getApp()
       const auth = app.globalData
+      const attemptKey = `${this.sessionId}:${q.id}`
+      if (!this.attemptTokens[attemptKey]) {
+        this.attemptTokens[attemptKey] = `mobile-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      }
 
       try {
         const data = await callCloud('structmind-practice', 'submitAnswer', {
@@ -430,6 +454,8 @@ export default {
           session_id: this.sessionId,
           question_id: q.id,
           user_answer: answer,
+          attempt_token: this.attemptTokens[attemptKey],
+          time_spent: Math.max(1, Math.round((Date.now() - this.questionStartedAt) / 1000)),
         })
         this.answerResult = data
 
@@ -453,10 +479,47 @@ export default {
       this.showToast('已生成10道随机练习', 'success')
     },
     async startRecommend() {
-      await this.loadQuestions('random', 15, true)
+      const app = getApp()
+      try {
+        const recommendations = await callCloud('structmind-learning', 'recommend', { token: app.globalData?.token, count: 15 })
+        const ids = (recommendations.recommendations || []).map(item => item.question_id)
+        if (!ids.length) throw new Error('暂无推荐题')
+        const session = await callCloud('structmind-practice', 'createSession', {
+          token: app.globalData?.token, question_ids: ids, limit: ids.length, mode: 'sequence',
+        })
+        const explanationById = Object.fromEntries((recommendations.recommendations || [])
+          .map(item => [String(item.question_id), item.explanation]))
+        this.questions = (session.questions || []).map(item => ({
+          ...normalizeCloudQuestion(item), recommendation_explanation: explanationById[String(item._id || item.id)] || '',
+        }))
+        this.sessionId = session.session_id
+      } catch (e) {
+        await this.loadQuestions('random', 15, true)
+      }
       this.currentIndex = 0
       this.currentPage = 1
       this.showToast('已生成错题优先练习', 'success')
+    },
+    async startNextRecommendation() {
+      const recommendation = this.answerResult?.next_recommendation
+      if (!recommendation?.question_id) return
+      let index = this.filteredQuestions.findIndex(q => String(q.id) === String(recommendation.question_id))
+      if (index < 0) {
+        await this.startRecommend()
+        index = this.filteredQuestions.findIndex(q => String(q.id) === String(recommendation.question_id))
+      }
+      if (index >= 0) this.enterAnswer(index)
+      else this.showToast('推荐依据已保存，题目将在下一轮出现', 'info')
+    },
+    percent(value) { return `${Math.round(Number(value || 0) * 100)}%` },
+    signedPercent(value) {
+      const amount = Math.round(Number(value || 0) * 100)
+      return `${amount >= 0 ? '+' : ''}${amount}%`
+    },
+    formatTime(value) { return value ? new Date(value).toLocaleString() : '待安排' },
+    errorReasonText(reason) {
+      const labels = { concept_gap: '知识点缺口', careless: '粗心失误', misconception: '概念误解', procedure_error: '步骤错误' }
+      return labels[reason.code || reason.category] || reason.label || '规则自动分类'
     },
 
     // ── Swipe handlers ──
@@ -680,4 +743,9 @@ export default {
   -webkit-backdrop-filter: blur(16px);
   border-top: 1px solid #edf2f0; display: flex; gap: 10px;
 }
+.learning-proof { margin-top: 14px; padding-top: 14px; border-top: 1px solid #dce5e3; display: flex; flex-direction: column; gap: 8px; }
+.proof-title { font-size: 14px; font-weight: 700; color: #1a2b28; }
+.proof-line { font-size: 12px; line-height: 1.6; color: #4a5c58; }
+.mastery-row { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: #2d8a7b; }
+.recommend-proof { padding: 12px; border-radius: 12px; background: #e8f5f2; display: flex; flex-direction: column; gap: 8px; }
 </style>

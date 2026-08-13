@@ -182,6 +182,7 @@ exports.main = async (event, context) => {
           limit = 20,           // 每次练习题目数
           mode = 'sequence',    // 'sequence' | 'random'
           include_wrong = false,// 是否包含错题
+          question_ids = [],    // 可解释推荐生成的显式题目集合
         } = params;
 
         // 构建查询条件
@@ -189,6 +190,7 @@ exports.main = async (event, context) => {
         if (types.length > 0) conditions.type = db.command.in(types);
         if (chapters.length > 0) conditions.chapter = db.command.in(chapters);
         if (difficulty.length > 0) conditions.difficulty = db.command.in(difficulty);
+        if (question_ids.length > 0) conditions._id = db.command.in(question_ids);
 
         // 查询符合条件的题目
         let query = questionsCollection.where(conditions);

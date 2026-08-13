@@ -51,6 +51,14 @@
     <view class="conv-status" v-if="conversationId">
       <text>对话 #{{ conversationId }}{{ tutorMode === 'multi-agent' ? '  · 多智能体模式' : '' }}</text>
     </view>
+    <view class="summary-card" v-if="conversationSummary">
+      <text class="summary-title">规则摘要</text>
+      <text class="summary-status">由确定性规则生成，每条结论可追溯到原消息</text>
+      <view class="summary-fact" v-for="fact in summaryFacts" :key="fact.message_id">
+        <text>{{ fact.text }}</text>
+        <text class="summary-ref">依据：{{ fact.message_id }}</text>
+      </view>
+    </view>
 
     <SmToast :visible="toastVisible" :message="toastMsg" :type="toastType" @close="toastVisible = false" />
   </view>
@@ -71,6 +79,7 @@ export default {
       streamContent: '',
       streamConvId: null,
       conversationId: null,
+      conversationSummary: null,
       tutorMode: 'standard',   // 'standard' | 'multi-agent'
       toastVisible: false,
       toastMsg: '',
@@ -92,6 +101,7 @@ export default {
       this.conversationId = null
       this.streamContent = ''
       this.streaming = false
+      this.conversationSummary = null
     },
     askExample(question) {
       this.userInput = question
@@ -138,6 +148,7 @@ export default {
         })
         this.messages.push({ role: 'assistant', content: reply || data.message || '暂未获得回复' })
         this.conversationId = data.conversation_id || this.streamConvId
+        await this.refreshConversationSummary()
       } catch (err) {
         this.messages.push({ role: 'assistant', content: '抱歉，AI服务暂时不可用。请检查API配置或网络连接。' })
         this.showToast('AI服务暂不可用', 'error')
@@ -147,11 +158,31 @@ export default {
         this.streamConvId = null
       }
     },
+    async refreshConversationSummary() {
+      if (!this.conversationId) return
+      try {
+        const data = await callCloud('structmind-learning', 'summarizeConversation', {
+          token: getApp().globalData?.token,
+          conversation_id: this.conversationId,
+        })
+        this.conversationSummary = data.summary?.summary_final || data.summary?.summary_rule || null
+      } catch (e) { this.conversationSummary = null }
+    },
 
     showToast(msg, type = 'info') {
       this.toastMsg = msg
       this.toastType = type
       this.toastVisible = true
+    },
+  },
+  computed: {
+    summaryFacts() {
+      if (!this.conversationSummary) return []
+      return [
+        ...(this.conversationSummary.student_understanding || []),
+        ...(this.conversationSummary.misconceptions || []),
+        ...(this.conversationSummary.next_steps || []),
+      ].filter(item => item && item.message_id)
     },
   },
 }
@@ -193,4 +224,8 @@ export default {
 .new-chat-btn text { font-size: 12px; color: #6b8280; }
 .conv-status { padding: 6px 16px 12px; }
 .conv-status text { font-size: 11px; color: #a0b0ac; }
+.summary-card { margin: 0 16px 12px; padding: 14px; border-radius: 14px; background: #fff; border: 1px solid #dce5e3; display: flex; flex-direction: column; gap: 8px; }
+.summary-title { font-size: 15px; font-weight: 700; color: #1a2b28; }
+.summary-status, .summary-ref { font-size: 11px; color: #6b8280; }
+.summary-fact { display: flex; flex-direction: column; gap: 3px; padding-top: 8px; border-top: 1px solid #edf2f0; font-size: 13px; color: #4a5c58; }
 </style>

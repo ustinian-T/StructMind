@@ -118,6 +118,54 @@
       </SmCard>
     </view>
 
+    <view class="section learning-archive">
+      <text class="section-title">考试学习计划</text>
+      <SmCard>
+        <view class="archive-form">
+          <text class="field-label">考试日期</text>
+          <input class="archive-input" type="date" v-model="examDate" />
+          <text class="field-label">每日学习时长（分钟）</text>
+          <input class="archive-input" type="number" v-model="dailyMinutes" />
+          <SmButton variant="primary" block @click="saveLearningPlan">保存并生成计划</SmButton>
+          <view v-if="learningPlan" class="plan-proof">
+            <text>计划版本 {{ learningPlan.version }} · {{ learningPlan.status }}</text>
+            <text v-for="(task, index) in (learningPlan.plan_data?.tasks || [])" :key="index">{{ task.title || task.concept }} · {{ task.estimated_minutes || 0 }}分钟</text>
+          </view>
+        </view>
+      </SmCard>
+    </view>
+
+    <view class="section" v-if="dueReviews.length">
+      <text class="section-title">今日间隔复习</text>
+      <SmCard>
+        <view class="review-item" v-for="review in dueReviews" :key="review.concept">
+          <text class="review-concept">{{ review.concept }}</text>
+          <text class="review-time">到期：{{ formatTime(review.next_review_at) }}</text>
+          <view class="feedback-row">
+            <view @tap="sendReviewFeedback(review, 'too_hard')">太难</view>
+            <view @tap="sendReviewFeedback(review, 'just_right')">正好</view>
+            <view @tap="sendReviewFeedback(review, 'too_easy')">太简单</view>
+          </view>
+        </view>
+      </SmCard>
+    </view>
+
+    <view class="section">
+      <text class="section-title">学习笔记</text>
+      <SmCard>
+        <view class="archive-form">
+          <input class="archive-input" v-model="noteTitle" placeholder="笔记标题" />
+          <textarea class="note-input" v-model="noteContent" placeholder="记录今天的理解与疑问" />
+          <SmButton variant="primary" block @click="createLearningNote">新增笔记</SmButton>
+          <view class="note-item" v-for="note in notes" :key="note._id">
+            <input class="archive-input" v-model="note.title" @blur="updateLearningNote(note)" />
+            <textarea class="note-input" v-model="note.user_content" @blur="updateLearningNote(note)" />
+            <text class="archive-note" @tap="archiveLearningNote(note)">归档笔记</text>
+          </view>
+        </view>
+      </SmCard>
+    </view>
+
     <!-- 菜单 -->
     <view class="menu-section">
       <view class="menu-item" @tap="goAdmin" v-if="isAdmin">
@@ -171,6 +219,13 @@ export default {
       fsrsReviewCount: 0,
       practiceTrend: Array(),
       trendTotal: 0,
+      learningPlan: null,
+      examDate: '',
+      dailyMinutes: 30,
+      dueReviews: Array(),
+      notes: Array(),
+      noteTitle: '',
+      noteContent: '',
       toastVisible: false,
       toastMsg: '',
       toastType: 'info',
@@ -202,7 +257,7 @@ export default {
     this.userName = auth.user?.name || '同学'
     this.userAccount = auth.user?.account || ''
     this.isAdmin = auth.user?.role === 'admin'
-    await this.loadProfile()
+    await Promise.all([this.loadProfile(), this.loadLearningArchive()])
   },
   onShow() {
     if (this.profile) this.loadProfile()
@@ -242,6 +297,66 @@ export default {
         console.log('Profile load failed')
       }
     },
+    async loadLearningArchive() {
+      const token = getApp().globalData?.token
+      if (!token) return
+      try {
+        const [planData, reviewData, noteData] = await Promise.all([
+          callCloud('structmind-learning', 'getPlan', { token }),
+          callCloud('structmind-learning', 'getReviews', { token }),
+          callCloud('structmind-learning', 'listNotes', { token, archived: false }),
+        ])
+        this.learningPlan = planData.plan || null
+        this.examDate = this.learningPlan?.exam_date || this.examDate
+        this.dailyMinutes = this.learningPlan?.daily_minutes || this.dailyMinutes
+        this.dueReviews = reviewData.reviews || []
+        this.notes = noteData.notes || []
+        this.fsrsReviewCount = this.dueReviews.length || this.fsrsReviewCount
+      } catch (e) { this.showToast('学习档案暂时无法加载', 'error') }
+    },
+    async saveLearningPlan() {
+      if (!this.examDate || Number(this.dailyMinutes) < 10) {
+        this.showToast('请选择考试日期，每日时长至少10分钟', 'error'); return
+      }
+      try {
+        const data = await callCloud('structmind-learning', 'savePlan', {
+          token: getApp().globalData?.token, exam_date: this.examDate,
+          daily_minutes: Number(this.dailyMinutes), timezone: 'Asia/Shanghai',
+        })
+        this.learningPlan = data.plan
+        this.showToast('学习计划已更新', 'success')
+      } catch (e) { this.showToast('学习计划保存失败', 'error') }
+    },
+    async sendReviewFeedback(review, feedback) {
+      try {
+        await callCloud('structmind-learning', 'reviewFeedback', {
+          token: getApp().globalData?.token, concept: review.concept, feedback,
+          learning_event_id: review.learning_event_id,
+        })
+        await this.loadLearningArchive()
+        this.showToast('复习反馈已记录', 'success')
+      } catch (e) { this.showToast('反馈保存失败', 'error') }
+    },
+    async createLearningNote() {
+      if (!this.noteTitle.trim()) { this.showToast('请输入笔记标题', 'error'); return }
+      await callCloud('structmind-learning', 'createNote', {
+        token: getApp().globalData?.token, title: this.noteTitle, user_content: this.noteContent,
+      })
+      this.noteTitle = ''; this.noteContent = ''; await this.loadLearningArchive()
+    },
+    async updateLearningNote(note) {
+      await callCloud('structmind-learning', 'updateNote', {
+        token: getApp().globalData?.token, note_id: note._id,
+        title: note.title, user_content: note.user_content, is_archived: false,
+      })
+    },
+    async archiveLearningNote(note) {
+      await callCloud('structmind-learning', 'updateNote', {
+        token: getApp().globalData?.token, note_id: note._id, is_archived: true,
+      })
+      await this.loadLearningArchive()
+    },
+    formatTime(value) { return value ? new Date(value).toLocaleString() : '现在' },
     generateTrend(dailyActivity) {
       const now = new Date()
       const days = Array()
@@ -414,4 +529,16 @@ export default {
 .menu-arrow { font-size: 18px; color: #c0c8c5; }
 
 .logout-section { padding: 24px 16px; }
+.learning-archive { margin-top: 24px; }
+.archive-form { display: flex; flex-direction: column; gap: 10px; }
+.field-label { font-size: 12px; color: #6b8280; }
+.archive-input, .note-input { box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid #dce5e3; border-radius: 10px; background: #fff; font-size: 14px; }
+.note-input { min-height: 72px; }
+.plan-proof { display: flex; flex-direction: column; gap: 5px; padding: 10px; border-radius: 10px; background: #e8f5f2; font-size: 12px; color: #2d8a7b; }
+.review-item, .note-item { padding: 12px 0; border-bottom: 1px solid #edf2f0; display: flex; flex-direction: column; gap: 8px; }
+.review-item:last-child, .note-item:last-child { border-bottom: 0; }
+.review-concept { font-size: 14px; font-weight: 700; color: #1a2b28; }
+.review-time { font-size: 11px; color: #6b8280; }
+.feedback-row { display: flex; gap: 8px; }
+.feedback-row view, .archive-note { flex: 1; padding: 8px; border-radius: 10px; background: #e8f5f2; color: #2d8a7b; font-size: 12px; text-align: center; }
 </style>
