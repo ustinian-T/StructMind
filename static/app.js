@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════
-   StructMind — App Core v2.0
+   StructMind App Core v2.0
    ═══════════════════════════════════════════ */
 
 const APP = { name: 'StructMind', subtitle: '数据结构 AI 智练中心' };
@@ -13,7 +13,7 @@ const S = {
   // Auth
   token: null, user: null,
   // Practice
-  session: null, idx: 0, results: {},
+  session: null, idx: 0, results: {}, attemptTokens: {}, questionStartedAt: {},
   assignmentSession: null, assignmentIdx: 0, assignmentResults: {},
   // AI
   aiQuestion: null, aiModal: null,
@@ -21,7 +21,8 @@ const S = {
   // WebSocket
   wsConnected: false, ws: null, wsReconnectTimer: null,
   // Profile
-  profile: null,
+  profile: null, learningPlan: null, dueReviews: [], learningEvents: {},
+  conversationSummary: null, notes: [], learningLoadError: '',
   // Misc
   wrongItems: [], discussionResult: null, selectedDiscussionId: null,
   toast: '', loading: false, modal: null,
@@ -95,6 +96,7 @@ async function init() {
     S.selectedDiscussionId = S.discussions[0]?.id||null;
     if (isLoggedIn()) {
       try { S.profile = (await api('/api/profile')).profile; } catch(e) {}
+      await loadLearningWorkspace();
     }
     render();
   } catch(e) {
@@ -246,19 +248,19 @@ function renderAiModal() {
 
 // ═══ Tabs ═══
 function navItems() {
-  const items = [['dashboard','学习台','home'],['practice','题库','play'],['assignment','作业','stack'],['ai','AI 导师','bot'],['wrong','复习','book'],['discussion','讨论题','message'],['audit','导入审计','shield'],['settings','AI 配置','settings']];
+  const items = [['dashboard','学习台','home'],['practice','题库','play'],['assignment','作业','stack'],['ai','AI 导师','bot'],['wrong','复习','book'],['archive','学习档案','shield'],['discussion','讨论题','message'],['audit','导入审计','shield'],['settings','AI 配置','settings']];
   return items;
 }
 
 function pageTitle() {
-  const m = {dashboard:['学习台','从下一项任务开始，保持稳定练习'],practice:['正式题库','按原题顺序、随机或薄弱项开始练习'],assignment:['课程作业','对照 Word 作业答案，使用 AI 参考批改'],ai:['AI 导师','通过解释、追问和提示建立理解'],discussion:['讨论题','梳理思路，获取 AI 参考反馈'],wrong:['复习','从最近错题和薄弱知识点重新开始'],settings:['AI 配置','管理模型与运行时密钥'],audit:['导入审计','核对题库来源、修复记录和答案处理'],admin:['管理审批','审核注册申请与用户状态']};
+  const m = {dashboard:['学习台','从下一项任务开始，保持稳定练习'],practice:['正式题库','按原题顺序、随机或薄弱项开始练习'],assignment:['课程作业','对照 Word 作业答案，使用 AI 参考批改'],ai:['AI 导师','通过解释、追问和提示建立理解'],discussion:['讨论题','梳理思路，获取 AI 参考反馈'],wrong:['复习','按到期时间、错因和薄弱知识点重新开始'],archive:['学习档案','查看对话摘要、错题笔记与手写补充'],settings:['AI 配置','管理模型与运行时密钥'],audit:['导入审计','核对题库来源、修复记录和答案处理'],admin:['管理审批','审核注册申请与用户状态']};
   const t = m[S.tab]||[S.tab,''];
   return {title:t[0],subtitle:t[1]};
 }
 
 function renderTab() {
   if (S.modal) return '';
-  const fns = {dashboard:renderDashboard,practice:renderPractice,assignment:renderAssignment,ai:renderAI,discussion:renderDiscussion,wrong:renderWrong,settings:renderSettings,audit:renderAudit,admin:renderAdmin};
+  const fns = {dashboard:renderDashboard,practice:renderPractice,assignment:renderAssignment,ai:renderAI,discussion:renderDiscussion,wrong:renderWrong,archive:renderArchive,settings:renderSettings,audit:renderAudit,admin:renderAdmin};
   return (fns[S.tab]||renderDashboard)();
 }
 
@@ -314,7 +316,24 @@ function renderDashboard() {
       <div><span>导入校验</span><strong>${intOk?'已通过':'需复核'}</strong></div>
       <button class="text-button" data-tab="audit">查看导入审计</button>
     </section>
+    ${renderPlanPanel()}
   </div>`;
+}
+
+function renderPlanPanel() {
+  if (!isLoggedIn()) return '';
+  const plan = S.learningPlan, data = plan?.plan_data||{};
+  const today = new Date().toISOString().slice(0,10);
+  const todayPlan = (data.days||[]).find(day=>day.date===today) || (data.days||[])[0];
+  return `<section class="plan-workspace" aria-labelledby="plan-title">
+    <div class="section-heading"><div><h3 id="plan-title">考试学习计划</h3><p>${plan?`第 ${plan.version} 版，${esc(plan.status)}`:'设置考试日期和每日可用时长'}</p></div></div>
+    <form class="plan-settings" id="planSettings">
+      <label class="form-group"><span class="form-label">考试日期</span><input class="form-input" id="planExamDate" name="exam_date" type="date" value="${escAttr(plan?.exam_date||'')}" required></label>
+      <label class="form-group"><span class="form-label">每日时长</span><input class="form-input" id="planDailyMinutes" name="daily_minutes" type="number" min="10" max="480" value="${plan?.daily_minutes||30}" required></label>
+      <button class="btn btn-primary" type="button" data-save-plan>保存并生成新版本</button>
+    </form>
+    ${todayPlan?`<div class="plan-day"><strong>${esc(todayPlan.date)} 的任务</strong><span>${todayPlan.estimated_minutes||0} 分钟</span><div>${(todayPlan.tasks||[]).map(task=>`<button class="plan-task" data-tab="${task.type==='due_review'?'wrong':'practice'}"><span>${esc(task.concept)}</span><small>${esc(task.reason)}，约 ${task.estimated_minutes} 分钟</small></button>`).join('')||'<p class="empty-desc">今日没有待排任务，可进行自由练习。</p>'}</div></div>`:'<div class="empty"><p class="empty-title">尚未生成考试计划</p><p class="empty-desc">保存设置后，系统会先排到期复习，再安排薄弱项。</p></div>'}
+  </section>`;
 }
 
 function renderProfileRadar() {
@@ -503,13 +522,18 @@ function renderDiscussion() {
 // ═══ Wrong ═══
 function renderWrong() {
   const ids = S.wrongItems.map(it=>it.question.id);
-  return `<div class="panel"><div class="panel-inner grid">
+  return `<div class="review-workspace">
+    <section class="panel"><div class="panel-inner grid">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
       <div><h3 style="margin:0">最近错题</h3><p style="color:var(--muted);margin:4px 0 0">按题目去重，重做后重新判断掌握情况</p></div>
       <div style="display:flex;gap:8px"><button class="btn btn-quiet btn-sm" data-load-wrong>刷新列表</button><button class="btn btn-primary btn-sm" data-redo-all ${ids.length?'':'disabled'}>开始本组复习</button></div>
     </div>
     ${S.wrongItems.length?S.wrongItems.map(it=>renderWrongItem(it)).join(''):'<div class="empty"><p class="empty-title">还没有错题记录</p><p class="empty-desc">完成正式题库练习后，答错的题目会自动进入这里。</p></div>'}
-  </div></div>`;
+    </div></section>
+    <aside class="review-queue" aria-labelledby="review-queue-title"><div class="section-heading"><div><h3 id="review-queue-title">到期复习</h3><p>反馈难度会调整下一次复习时间</p></div></div>
+      ${S.dueReviews.length?S.dueReviews.map(item=>`<article class="review-item"><strong>${esc(item.concept)}</strong><span>掌握度 ${Math.round(Number(item.mastery_score||0)*100)}%</span><small>原计划 ${formatDateTime(item.next_review_at)}</small><div class="review-feedback" aria-label="${escAttr(item.concept)}复习反馈"><button data-review-feedback="too_hard" data-review-concept="${escAttr(item.concept)}">偏难</button><button data-review-feedback="just_right" data-review-concept="${escAttr(item.concept)}">合适</button><button data-review-feedback="too_easy" data-review-concept="${escAttr(item.concept)}">偏易</button></div></article>`).join(''):'<div class="empty"><p class="empty-title">当前没有到期复习</p><p class="empty-desc">每次答题后都会自动安排下一次复习。</p></div>'}
+    </aside>
+  </div>`;
 }
 
 function renderWrongItem(it) {
@@ -523,6 +547,23 @@ function renderWrongItem(it) {
     <div class="side-row"><span>标准答案</span><strong style="color:var(--success)">${esc(q.answer)}</strong></div>
     <div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-primary btn-sm" data-redo-question="${q.id}">重做本题</button><button class="btn btn-ghost btn-sm" data-open-question-ai="${q.id}">AI 解析</button></div>
   </div>`;
+}
+
+function renderArchive() {
+  if (!isLoggedIn()) return '<div class="empty"><p class="empty-title">登录后查看学习档案</p></div>';
+  const summary = S.conversationSummary?.summary_final;
+  return `<div class="archive-workspace">
+    <section class="panel"><div class="panel-inner"><div class="section-heading"><div><h3>最近对话摘要</h3><p>离线规则提取，所有理解结论都保留消息引用</p></div>${S.tutorConvId?`<button class="btn btn-quiet btn-sm" data-refresh-summary>刷新摘要</button>`:''}</div>
+      ${summary?`<div class="summary-sections"><div><strong>讨论知识点</strong><p>${(summary.concepts||[]).map(esc).join('、')||'未识别'}</p></div><div><strong>我的理解</strong>${renderReferencedFacts(summary.student_understanding)}</div><div><strong>待解决问题</strong>${renderReferencedFacts(summary.unresolved_questions)}</div><div><strong>下一步</strong><p>${(summary.next_actions||[]).map(esc).join('；')}</p></div></div>`:'<div class="empty"><p class="empty-title">暂无对话摘要</p><p class="empty-desc">完成一次 AI 导师对话后可生成，不依赖 AI 再次调用。</p></div>'}
+    </div></section>
+    <section class="panel"><div class="panel-inner"><div class="section-heading"><div><h3>学习笔记</h3><p>自动事实与手写正文分开保存</p></div><button class="btn btn-quiet btn-sm" data-load-notes>刷新</button></div>
+      <div class="notes-list">${S.notes.length?S.notes.map(note=>`<article class="learning-note"><div><strong>${esc(note.title)}</strong><span>${esc(note.concept||note.source_type)}</span></div>${note.auto_content?`<details><summary>查看自动事实</summary><p>${esc(note.auto_content.error_reason?.category||'规则摘要')}，下次复习 ${formatDateTime(note.auto_content.next_review_at)}</p></details>`:''}<label class="form-group"><span class="form-label">我的补充</span><textarea class="form-textarea" data-note-content="${escAttr(note.id||note._id)}">${esc(note.user_content||'')}</textarea></label><div class="note-actions"><button class="btn btn-primary btn-sm" data-save-note="${escAttr(note.id||note._id)}">保存补充</button><button class="btn btn-ghost btn-sm" data-archive-note="${escAttr(note.id||note._id)}">${note.is_archived?'恢复':'归档'}</button></div></article>`).join(''):'<div class="empty"><p class="empty-title">暂无学习笔记</p><p class="empty-desc">错题和对话摘要会自动生成笔记。</p></div>'}</div>
+    </div></section>
+  </div>`;
+}
+
+function renderReferencedFacts(items=[]) {
+  return items.length?`<ul>${items.map(item=>`<li>${esc(item.text)} <small>消息 ${esc(item.message_id)}</small></li>`).join('')}</ul>`:'<p>暂无</p>';
 }
 
 // ═══ Settings ═══
@@ -595,8 +636,16 @@ function renderAssignmentActions(q) {
 }
 
 function renderResult(r) {
+  const changes = r.mastery_changes||[], reason = r.error_reason||{}, recommendation = r.next_recommendation;
   return `<section class="result ${r.is_correct?'correct':'wrong'}" aria-label="答题结果"><div class="result-head"><span class="result-icon" aria-hidden="true">${r.is_correct?'✓':'×'}</span><div><strong>${r.is_correct?'回答正确':'回答错误'}</strong><span class="source-badge source-official">正式题库标准答案</span></div></div>
-    <div class="answer-line"><span>标准答案</span>${renderRich(r.correct_answer)}</div>${r.analysis?`<div class="answer-line"><span>解析</span>${renderRich(r.analysis)}</div>`:''}<div class="result-actions"><button class="btn btn-primary" data-next-question>继续下一题</button></div></section>`;
+    <div class="answer-line"><span>标准答案</span>${renderRich(r.correct_answer)}</div>${r.analysis?`<div class="answer-line"><span>解析</span>${renderRich(r.analysis)}</div>`:''}
+    ${r.learning_event_id?`<div class="learning-evidence"><div class="evidence-heading"><strong>本次知识变化</strong><span>${r.enhancement_status==='rule_only'?'规则基础结果':'已增强'}</span></div>
+      <div class="mastery-changes">${changes.map(change=>`<div class="mastery-change"><span>${esc(change.concept)} <small>${change.role==='primary'?'主要':'次要'} ${Math.round(Number(change.weight||0)*100)}%</small></span><strong>${formatPercent(change.before_score)} → ${formatPercent(change.after_score)}</strong><em class="${Number(change.delta)>=0?'positive':'negative'}">${Number(change.delta)>=0?'+':''}${Math.round(Number(change.delta||0)*100)}%</em></div>`).join('')}</div>
+      <div class="evidence-detail"><div><span>错因分类</span><strong>${esc(errorReasonLabel(reason.category))}</strong><small>置信度 ${Math.round(Number(reason.confidence||0)*100)}%，来源 ${esc(reason.source||'rule')}</small></div><div><span>下次复习</span><strong>${formatDateTime(r.review_updates?.[0]?.next_review_at)}</strong><small>${esc(r.review_updates?.[0]?.review_state||'已安排')}</small></div></div>
+      ${recommendation?`<details class="recommendation-reason" open><summary>为什么推荐下一题</summary><p>${esc(recommendation.explanation)}</p><div class="score-breakdown">${Object.entries(recommendation.score_breakdown||{}).map(([key,value])=>`<span>${esc(scoreLabel(key))}: ${Number(value)>0?'+':''}${esc(value)}</span>`).join('')}</div><button class="btn btn-primary" data-start-recommendation="${escAttr(recommendation.question_id)}">练习这道题</button></details>`:''}
+      <a class="event-link" href="#" data-event-id="${escAttr(r.learning_event_id)}">事件 ${esc(r.learning_event_id)}</a>
+    </div>`:''}
+    <div class="result-actions"><button class="btn btn-primary" data-next-question>继续下一题</button></div></section>`;
 }
 
 function renderAssignmentResult(r) {
@@ -637,6 +686,10 @@ function modeTitle(m) { return {explain:'AI讲解',check:'题目检查',ask:'追
 function anyAIConfigured() { return (S.config.providers||[]).some(p=>p.ai_configured); }
 function providerStatus(id) { return (S.config.providers||[]).find(p=>p.id===id)||{}; }
 function profileAccuracy() { return S.profile?.total_attempts?Math.round((S.profile.total_correct||0)/S.profile.total_attempts*100):0; }
+function formatPercent(value) { return `${Math.round(Number(value||0)*100)}%`; }
+function formatDateTime(value) { return value?new Date(value).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'待安排'; }
+function errorReasonLabel(value) { return ({answer_format:'答案格式',guessing:'作答过快',reading_omission:'审题遗漏',concept_gap:'概念缺口',unclassified:'证据不足'})[value]||'证据不足'; }
+function scoreLabel(value) { return ({due_review:'到期复习',mastery_gap:'掌握缺口',error_match:'错因匹配',exam_urgency:'考试临近',plan_match:'计划匹配',novelty:'知识覆盖',repeat_penalty:'近期重复'})[value]||value; }
 function modelOpts(sel=S.config.default_model) {
   return (S.config.providers||[]).map(p=>`<optgroup label="${esc(p.label)}">${(p.models||[]).map(m=>`<option value="${m}" ${m===sel?'selected':''}>${m}</option>`).join('')}</optgroup>`).join('');
 }
@@ -701,14 +754,14 @@ async function startSession(mode) {
   const ch = document.querySelector('#pChapter')?.value||'';
   const cnt = document.querySelector('#pCount')?.value||'';
   S.session = await api('/api/session',{method:'POST',body:JSON.stringify({mode,types,chapters:ch?[ch]:[],count:cnt?Number(cnt):null})});
-  S.idx=0; S.results={}; render();
+  S.idx=0; S.results={}; S.attemptTokens={}; S.questionStartedAt={}; markQuestionStarted(); render();
 }
 async function startAssignmentSession(mode) {
   const types = [...document.querySelectorAll('input[name="aType"]:checked')].map(c=>c.value);
   const ch = document.querySelector('#aChapter')?.value||'';
   const cnt = document.querySelector('#aCount')?.value||'';
   S.assignmentSession = await api('/api/session',{method:'POST',body:JSON.stringify({bank_id:'assignment',mode,types,chapters:ch?[ch]:[],count:cnt?Number(cnt):null})});
-  S.assignmentIdx=0; S.assignmentResults={}; render();
+  S.assignmentIdx=0; S.assignmentResults={}; S.attemptTokens={}; S.questionStartedAt={}; markQuestionStarted('assignment'); render();
 }
 
 async function recommendPractice() {
@@ -718,7 +771,7 @@ async function recommendPractice() {
     if (!d.questions?.length) { toast('暂无推荐题目，请先练习一些题目'); return; }
     const ids = d.questions.map(q=>q.id);
     S.session = await api('/api/session',{method:'POST',body:JSON.stringify({mode:'random',question_ids:ids,count:null})});
-    S.idx=0; S.results={}; S.tab='practice'; render();
+    S.idx=0; S.results={}; S.attemptTokens={}; S.questionStartedAt={}; markQuestionStarted(); S.tab='practice'; render();
   } catch(e) { toast(e.message); }
 }
 
@@ -726,15 +779,37 @@ async function recommendPractice() {
 async function submitBankAnswer() {
   const q = S.session.questions[S.idx]; const ans = collectAnswer('bank',q.qtype);
   if (!ans||(Array.isArray(ans)&&!ans.length)){toast('请先作答');return;}
-  const r = await api('/api/answer',{method:'POST',body:JSON.stringify({question_id:q.id,answer:ans})});
+  const key = attemptKey('bank',q.id);
+  const r = await api('/api/answer',{method:'POST',body:JSON.stringify({
+    question_id:q.id, answer:ans, attempt_token:getAttemptToken(key), session_id:S.session.session_id,
+    time_spent_seconds:Math.max(0,Math.round((performance.now()-(S.questionStartedAt[key]||performance.now()))/1000)),
+  })});
   S.results[`bank-${q.id}`]=r; await refreshStats(); render();
 }
 async function submitAssignmentAnswer() {
   const q = S.assignmentSession?.questions?.[S.assignmentIdx]; if (!q) return;
   const ans = collectAnswer('assignment',q.qtype);
   if (!ans||(Array.isArray(ans)&&!ans.length)){toast('请先作答');return;}
-  const r = await api('/api/answer',{method:'POST',body:JSON.stringify({bank_id:'assignment',question_id:q.id,answer:ans})});
+  const key = attemptKey('assignment',q.id);
+  const r = await api('/api/answer',{method:'POST',body:JSON.stringify({bank_id:'assignment',question_id:q.id,answer:ans,
+    attempt_token:getAttemptToken(key),session_id:S.assignmentSession.session_id,
+    time_spent_seconds:Math.max(0,Math.round((performance.now()-(S.questionStartedAt[key]||performance.now()))/1000))})});
   S.assignmentResults[`assignment-${q.id}`]=r; await refreshStats(); render();
+}
+
+function attemptKey(source, questionId) { return `${source}:${S.session?.session_id||S.assignmentSession?.session_id||'session'}:${questionId}`; }
+function getAttemptToken(key) {
+  if (!S.attemptTokens[key]) S.attemptTokens[key] = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return S.attemptTokens[key];
+}
+function markQuestionStarted(source='bank') {
+  const session = source==='assignment'?S.assignmentSession:S.session;
+  const index = source==='assignment'?S.assignmentIdx:S.idx;
+  const question = session?.questions?.[index];
+  if (question) {
+    const key = attemptKey(source,question.id);
+    if (!S.questionStartedAt[key]) S.questionStartedAt[key]=performance.now();
+  }
 }
 function showAssignmentAnswer(qid) {
   const q = S.assignmentSession?.questions?.find(q=>Number(q.id)===Number(qid)); if (!q) return;
@@ -890,6 +965,7 @@ async function sendTutorMsg() {
       S.tutorMessages.push({role:'assistant',content:d.reply}); S.tutorConvId = d.conversation_id;
     } catch(e2) { S.tutorMessages.push({role:'assistant',content:'AI 服务暂时不可用。请检查模型配置或网络连接后重试。'}); }
   } finally {
+    if (S.tutorConvId) { try { await refreshConversationSummary(); } catch(_error) {} }
     S.tutorLoading=false; S.tutorStreamContent=''; render();
     setTimeout(()=>{const c=document.querySelector('#tutorChat');if(c)c.scrollTop=c.scrollHeight;},100);
   }
@@ -923,11 +999,52 @@ async function runQuestionAI(mode) {
 }
 
 // ═══ Wrong ═══
-async function loadWrong() { try { S.wrongItems = (await api('/api/wrong')).items||[]; } catch(e) {} }
+async function loadLearningWorkspace() {
+  if (!isLoggedIn()) return;
+  const [plan, reviews, noteResult] = await Promise.allSettled([
+    api('/api/learning/plan'), api('/api/learning/reviews'), api('/api/learning/notes'),
+  ]);
+  if (plan.status==='fulfilled') S.learningPlan=plan.value.plan;
+  if (reviews.status==='fulfilled') S.dueReviews=reviews.value.reviews||[];
+  if (noteResult.status==='fulfilled') S.notes=noteResult.value.notes||[];
+  const failed = [plan,reviews,noteResult].find(item=>item.status==='rejected');
+  S.learningLoadError = failed?.reason?.message||'';
+}
+
+async function loadWrong() {
+  try {
+    const [wrong,reviews] = await Promise.all([api('/api/wrong'),isLoggedIn()?api('/api/learning/reviews'):Promise.resolve({reviews:[]})]);
+    S.wrongItems=wrong.items||[]; S.dueReviews=reviews.reviews||[];
+  } catch(e) { S.learningLoadError=e.message; }
+}
+async function saveLearningPlan() {
+  const exam_date=document.querySelector('#planExamDate')?.value;
+  const daily_minutes=Number(document.querySelector('#planDailyMinutes')?.value);
+  if (!exam_date||daily_minutes<10||daily_minutes>480) { toast('请填写有效的考试日期和每日时长'); return; }
+  S.learningPlan=(await api('/api/learning/generate-plan',{method:'POST',body:JSON.stringify({exam_date,daily_minutes,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'Asia/Shanghai'})})).plan;
+  render(); toast('学习计划已生成新版本','success');
+}
+async function sendReviewFeedback(concept, feedbackValue) {
+  await api('/api/learning/reviews/feedback',{method:'POST',body:JSON.stringify({concept,feedback:feedbackValue})});
+  await loadWrong(); render(); toast('复习时间已更新','success');
+}
+async function loadNotes() { S.notes=(await api('/api/learning/notes')).notes||[]; render(); }
+async function updateNote(noteId, changes) {
+  const result=await api(`/api/learning/notes/${encodeURIComponent(noteId)}`,{method:'PATCH',body:JSON.stringify(changes)});
+  S.notes=S.notes.map(note=>(note.id||note._id)===noteId?result.note:note); render();
+}
+async function refreshConversationSummary() {
+  if (!S.tutorConvId) return;
+  S.conversationSummary=(await api(`/api/learning/conversations/${encodeURIComponent(S.tutorConvId)}/summary`,{method:'POST'})).summary;
+}
+async function startRecommendedQuestion(questionId) {
+  S.session=await api('/api/session',{method:'POST',body:JSON.stringify({mode:'sequence',question_ids:[Number(questionId)],count:1})});
+  S.idx=0; S.results={}; S.attemptTokens={}; S.questionStartedAt={}; markQuestionStarted(); render();
+}
 async function startWrongSession(ids) {
   if (!ids.length){toast('没有可重做的错题');return;}
   S.session = await api('/api/session',{method:'POST',body:JSON.stringify({mode:'wrong',question_ids:ids,count:null})});
-  S.idx=0; S.results={}; S.tab='practice'; render();
+  S.idx=0; S.results={}; S.attemptTokens={}; S.questionStartedAt={}; markQuestionStarted(); S.tab='practice'; render();
 }
 
 // ═══ Config ═══
@@ -981,12 +1098,14 @@ function bindEvents() {
           await handleLogin(account,password);
           S.modal=null;
           try { S.profile = (await api('/api/profile')).profile; } catch(x) {}
+          await loadLearningWorkspace();
           render(); toast('登录成功','success');
         }
       }
       else if (btn.dataset.tab) {
         S.aiModal=null; S.modal=null; S.tab=btn.dataset.tab;
         if (S.tab==='wrong') await loadWrong();
+        if (S.tab==='archive') await loadNotes();
         if (S.tab==='admin') { render(); await loadAdminPanel(); return; }
         render();
       }
@@ -996,11 +1115,11 @@ function bindEvents() {
       else if (btn.hasAttribute('data-submit-assignment')) await submitAssignmentAnswer();
       else if (btn.hasAttribute('data-grade-assignment')) await gradeAssignment();
       else if (btn.dataset.showAssignmentAnswer) showAssignmentAnswer(btn.dataset.showAssignmentAnswer);
-      else if (btn.hasAttribute('data-prev-question')) { S.idx=Math.max(0,S.idx-1); render(); }
-      else if (btn.hasAttribute('data-next-question')) { S.idx=Math.min(S.session.questions.length-1,S.idx+1); render(); }
-      else if (btn.hasAttribute('data-reset-session')) { S.session=null; S.idx=0; render(); }
+      else if (btn.hasAttribute('data-prev-question')) { S.idx=Math.max(0,S.idx-1); markQuestionStarted(); render(); }
+      else if (btn.hasAttribute('data-next-question')) { S.idx=Math.min(S.session.questions.length-1,S.idx+1); markQuestionStarted(); render(); }
+      else if (btn.hasAttribute('data-reset-session')) { S.session=null; S.idx=0; S.attemptTokens={}; S.questionStartedAt={}; render(); }
       else if (btn.hasAttribute('data-prev-assignment')) { S.assignmentIdx=Math.max(0,S.assignmentIdx-1); render(); }
-      else if (btn.hasAttribute('data-next-assignment')) { S.assignmentIdx=Math.min(S.assignmentSession.questions.length-1,S.assignmentIdx+1); render(); }
+      else if (btn.hasAttribute('data-next-assignment')) { S.assignmentIdx=Math.min(S.assignmentSession.questions.length-1,S.assignmentIdx+1); markQuestionStarted('assignment'); render(); }
       else if (btn.hasAttribute('data-reset-assignment')) { S.assignmentSession=null; S.assignmentIdx=0; render(); }
       else if (btn.hasAttribute('data-generate-ai')) await generateAI();
       else if (btn.hasAttribute('data-submit-ai')) await submitAIAnswer();
@@ -1014,6 +1133,19 @@ function bindEvents() {
       else if (btn.dataset.aiAction) await runQuestionAI(btn.dataset.aiAction);
       else if (btn.dataset.action==='resetTutor') { S.tutorMessages=[]; S.tutorConvId=null; render(); }
       else if (btn.dataset.action==='sendTutor') { await sendTutorMsg(); }
+      else if (btn.hasAttribute('data-save-plan')) await saveLearningPlan();
+      else if (btn.dataset.reviewFeedback) await sendReviewFeedback(btn.dataset.reviewConcept,btn.dataset.reviewFeedback);
+      else if (btn.dataset.startRecommendation) await startRecommendedQuestion(btn.dataset.startRecommendation);
+      else if (btn.hasAttribute('data-refresh-summary')) { await refreshConversationSummary(); render(); }
+      else if (btn.hasAttribute('data-load-notes')) await loadNotes();
+      else if (btn.dataset.saveNote) {
+        const content=document.querySelector(`[data-note-content="${CSS.escape(btn.dataset.saveNote)}"]`)?.value||'';
+        await updateNote(btn.dataset.saveNote,{user_content:content}); toast('笔记已保存','success');
+      }
+      else if (btn.dataset.archiveNote) {
+        const note=S.notes.find(item=>(item.id||item._id)===btn.dataset.archiveNote);
+        await updateNote(btn.dataset.archiveNote,{is_archived:!note?.is_archived}); toast(note?.is_archived?'笔记已恢复':'笔记已归档','success');
+      }
     } catch(err) { toast(err.message); }
   });
 
