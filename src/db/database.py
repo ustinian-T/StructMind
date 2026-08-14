@@ -314,6 +314,10 @@ class PracticeDatabase:
     def connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(str(self.path))
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute("PRAGMA synchronous = NORMAL")
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA busy_timeout = 5000")
         return connection
 
     def init(self) -> None:
@@ -723,14 +727,20 @@ class PracticeDatabase:
 
     # ── 错题本 ──
 
-    def wrong_attempts(self, bank, limit: int = 80) -> list[dict[str, Any]]:
+    def wrong_attempts(self, bank, limit: int = 80, user_id: int = 0) -> list[dict[str, Any]]:
         questions = bank.by_id
+        where = "is_correct = 0 AND source IN ('bank', 'exam')"
+        params: list[Any] = []
+        if user_id > 0:
+            where += " AND user_id = ?"
+            params.append(user_id)
+        params.append(limit * 4)
         with self.connect() as db:
             rows = db.execute(
-                """SELECT * FROM attempts
-                WHERE is_correct = 0 AND source IN ('bank', 'exam')
+                f"""SELECT * FROM attempts
+                WHERE {where}
                 ORDER BY created_at DESC LIMIT ?""",
-                (limit * 4,),
+                tuple(params),
             ).fetchall()
         items: list[dict[str, Any]] = []
         seen: set[int] = set()

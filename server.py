@@ -96,12 +96,20 @@ app = FastAPI(
 )
 
 # CORS
+allowed_origins_env = os.environ.get("SM_ALLOWED_ORIGINS", "").strip()
+if allowed_origins_env:
+    allowed_origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
+    allow_credentials = True
+else:
+    allowed_origins = ["*"]
+    allow_credentials = False
+    print("CORS: SM_ALLOWED_ORIGINS not set, using wildcard with credentials disabled.")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
-    allow_credentials=True,
+    allow_credentials=allow_credentials,
 )
 
 

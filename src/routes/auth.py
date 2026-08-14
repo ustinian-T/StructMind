@@ -48,9 +48,9 @@ async def login(req: LoginRequest, request: Request):
         if not user:
             raise ValueError("账号或密码错误。")
         if user["status"] == "pending":
-            raise ValueError("账号正在等待管理员审批，请耐心等候。")
+            raise PermissionError("账号正在等待管理员审批，请耐心等候。")
         if user["status"] == "rejected":
-            raise ValueError("账号注册已被拒绝。")
+            raise PermissionError("账号注册已被拒绝。")
         token = db.create_session(user["id"])
         return {"token": token, "user": user}
     except Exception as exc:
