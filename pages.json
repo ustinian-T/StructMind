@@ -18,7 +18,7 @@
 			"path": "pages/index/index",
 			"style": {
 				"navigationBarTitleText": "StructMind",
-				"navigationBarBackgroundColor": "#2d8a7b",
+				"navigationBarBackgroundColor": "#477a50",
 				"navigationBarTextStyle": "white"
 			}
 		},
@@ -38,6 +38,12 @@
 			"path": "pages/ai/ai",
 			"style": {
 				"navigationBarTitleText": "AI 导师"
+			}
+		},
+		{
+			"path": "pages/ai-settings/ai-settings",
+			"style": {
+				"navigationBarTitleText": "我的 AI 模型"
 			}
 		},
 		{
@@ -62,14 +68,14 @@
 	"globalStyle": {
 		"navigationBarTextStyle": "white",
 		"navigationBarTitleText": "StructMind",
-		"navigationBarBackgroundColor": "#2d8a7b",
-		"backgroundColor": "#f5f8f7"
+		"navigationBarBackgroundColor": "#477a50",
+		"backgroundColor": "#f3f7f0"
 	},
 	"tabBar": {
 		"color": "#8a9b96",
-		"selectedColor": "#2d8a7b",
+		"selectedColor": "#477a50",
 		"borderStyle": "white",
-		"backgroundColor": "#ffffff",
+		"backgroundColor": "#fffefb",
 		"list": [
 			{
 				"pagePath": "pages/index/index",

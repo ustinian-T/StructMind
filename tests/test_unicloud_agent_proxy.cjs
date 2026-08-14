@@ -74,13 +74,23 @@ function load(cloud) {
   global.uniCloud = cloud.uniCloud;
   process.env.SM_AGENT_CORE_URL = 'https://agent.example.com/';
   process.env.SM_AGENT_SERVICE_KEY = 'service-secret';
+  process.env.SM_USER_AI_MASTER_KEY = Buffer.alloc(32, 7).toString('base64');
+  process.env.SM_AGENT_CREDENTIAL_KEY = Buffer.alloc(32, 9).toString('base64');
   delete require.cache[AI_MODULE];
   return require(AI_MODULE).main;
 }
 
 test('tutor is a credentialed proxy preserving the FastAPI event protocol', async () => {
   const cloud = createCloud();
-  const result = await load(cloud)({
+  const main = load(cloud);
+  await main({
+    action: 'saveAIConfig',
+    params: {
+      token: 'token', provider_id: 'deepseek', api_key: 'test-provider-key',
+      model_id: 'deepseek-v4-flash',
+    },
+  }, {});
+  const result = await main({
     action: 'tutor',
     params: { token: 'token', message: '解释栈', mode: 'multi-agent' },
   }, {});
@@ -91,6 +101,8 @@ test('tutor is a credentialed proxy preserving the FastAPI event protocol', asyn
   assert.equal(cloud.requests[0].options.headers['X-StructMind-Service-Key'], 'service-secret');
   assert.equal(cloud.requests[0].options.headers.Authorization, undefined);
   assert.equal(cloud.requests[0].options.data.mode, 'multi_agent');
+  assert.equal(typeof cloud.requests[0].options.data.credential_envelope.ciphertext, 'string');
+  assert.equal(JSON.stringify(cloud.requests[0]).includes('test-provider-key'), false);
   assert.deepEqual(result.data.events, cloud.coreEvents);
   assert.equal(result.data.message, '逐Token回复');
   assert.equal(cloud.tables.structmind_ai_conversations[0].messages.length, 2);

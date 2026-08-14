@@ -168,6 +168,11 @@
 
     <!-- 菜单 -->
     <view class="menu-section">
+      <view class="menu-item" @tap="goAISettings">
+        <text class="menu-icon"></text>
+        <text class="menu-text">我的 AI 模型</text>
+        <text class="menu-arrow">></text>
+      </view>
       <view class="menu-item" @tap="goAdmin" v-if="isAdmin">
         <text class="menu-icon"></text>
         <text class="menu-text">管理审批</text>
@@ -377,6 +382,7 @@ export default {
       return days
     },
     goAdmin() { uni.navigateTo({ url: '/pages/admin/admin' }) },
+    goAISettings() { uni.navigateTo({ url: '/pages/ai-settings/ai-settings' }) },
     goWrong() { uni.navigateTo({ url: '/pages/wrong/wrong' }) },
     goDashboard() { uni.switchTab({ url: '/pages/index/index' }) },
     extractConceptMastery(profile, stats) {
@@ -431,11 +437,11 @@ export default {
 </script>
 
 <style scoped>
-.profile-page { min-height: 100vh; background: #f5f8f7; padding-bottom: 40px; }
+.profile-page { min-height: 100vh; background: #f3f7f0; padding-bottom: 40px; }
 
 /* Header */
 .profile-header {
-  background: linear-gradient(135deg, #2d8a7b, #47b5a3);
+  background: #3f744a;
   padding: 56px 24px 32px;
   display: flex; flex-direction: column; align-items: center; gap: 6px;
 }
@@ -462,7 +468,7 @@ export default {
   flex-direction: column; align-items: center;
 }
 .stat-num { font-size: 24px; font-weight: 700; color: #1a2b28; }
-.stat-num.accent { color: #2d8a7b; }
+.stat-num.accent { color: #477a50; }
 .stat-num.review { color: #e89c35; }
 .stat-label { font-size: 12px; color: #6b8280; margin-top: 2px; }
 
@@ -483,9 +489,9 @@ export default {
 .ch-row { display: flex; flex-direction: column; gap: 3px; }
 .ch-info { display: flex; justify-content: space-between; }
 .ch-name { font-size: 13px; color: #4a5c58; }
-.ch-score { font-size: 13px; font-weight: 600; color: #2d8a7b; }
+.ch-score { font-size: 13px; font-weight: 600; color: #477a50; }
 .ch-track { height: 6px; border-radius: 3px; background: #edf2f0; overflow: hidden; }
-.ch-fill { height: 100%; border-radius: 3px; background: #2d8a7b; transition: width 0.5s ease; }
+.ch-fill { height: 100%; border-radius: 3px; background: #477a50; transition: width 0.5s ease; }
 
 /* Concept Grid */
 .concept-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -506,7 +512,7 @@ export default {
 }
 .trend-bar-inner {
   width: 100%; min-height: 4px; border-radius: 6px 6px 0 0;
-  background: linear-gradient(180deg, #47b5a3, #2d8a7b); transition: height 0.4s ease;
+  background: #6f9a73; transition: height 0.4s ease;
 }
 .trend-date { font-size: 10px; color: #a0b0ac; }
 .trend-summary { margin-top: 8px; text-align: center; }
@@ -522,8 +528,8 @@ export default {
   padding: 16px 18px; border-bottom: 1px solid #f5f5f5;
 }
 .menu-item:last-child { border-bottom: none; }
-.menu-item.spaced-item { background: rgba(45,138,123,0.04); }
-.menu-item.spaced-item .menu-text { color: #2d8a7b; }
+.menu-item.spaced-item { background: #f5f8f2; }
+.menu-item.spaced-item .menu-text { color: #477a50; }
 .menu-icon { font-size: 20px; }
 .menu-text { flex: 1; font-size: 15px; color: #1a2b28; font-weight: 500; }
 .menu-arrow { font-size: 18px; color: #c0c8c5; }
@@ -534,11 +540,11 @@ export default {
 .field-label { font-size: 12px; color: #6b8280; }
 .archive-input, .note-input { box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid #dce5e3; border-radius: 10px; background: #fff; font-size: 14px; }
 .note-input { min-height: 72px; }
-.plan-proof { display: flex; flex-direction: column; gap: 5px; padding: 10px; border-radius: 10px; background: #e8f5f2; font-size: 12px; color: #2d8a7b; }
+.plan-proof { display: flex; flex-direction: column; gap: 5px; padding: 10px; border-radius: 10px; background: #edf5e9; font-size: 12px; color: #477a50; }
 .review-item, .note-item { padding: 12px 0; border-bottom: 1px solid #edf2f0; display: flex; flex-direction: column; gap: 8px; }
 .review-item:last-child, .note-item:last-child { border-bottom: 0; }
 .review-concept { font-size: 14px; font-weight: 700; color: #1a2b28; }
 .review-time { font-size: 11px; color: #6b8280; }
 .feedback-row { display: flex; gap: 8px; }
-.feedback-row view, .archive-note { flex: 1; padding: 8px; border-radius: 10px; background: #e8f5f2; color: #2d8a7b; font-size: 12px; text-align: center; }
+.feedback-row view, .archive-note { flex: 1; padding: 8px; border-radius: 10px; background: #edf5e9; color: #477a50; font-size: 12px; text-align: center; }
 </style>

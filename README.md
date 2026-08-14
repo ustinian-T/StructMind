@@ -10,8 +10,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.11+-blue" alt="Python"/>
-  <img src="https://img.shields.io/badge/Vue-3.x-green" alt="Vue"/>
-  <img src="https://img.shields.io/badge/uni--app-x-2.0-brightgreen" alt="uni-app-x"/>
+  <img src="https://img.shields.io/badge/Vanilla%20JS-ES2020+-yellow" alt="Vanilla JS"/>
   <img src="https://img.shields.io/badge/license-MIT-orange" alt="License"/>
   <a href="https://beian.miit.gov.cn"><img src="https://img.shields.io/badge/ICP-%E6%B9%98%E5%A4%872026021754%E5%8F%B7--2-blue" alt="ICP"/></a>
 </p>
@@ -28,8 +27,8 @@
 - 🏆 **排行榜** — 周榜 / 月榜激励持续学习
 - 💬 **社区讨论** — 题目讨论区，发帖、回复、互相交流
 - 📖 **错题本** — 自动收集错题，支持重做和 AI 解析
-- 📱 **uni-app 多端** — 支持 H5 / Android / iOS，一套代码多端部署
-- 🎨 **现代 UI** — 玻璃拟态设计、浅绿色品牌配色、流畅动画
+- 📱 **响应式 Web** — 桌面 + 移动端一套自适应界面，桌面优先
+- 🎨 **现代 UI** — 中性极简设计、清晰的信息层级、细腻的微交互
 
 ## 🚀 快速开始
 
@@ -51,15 +50,17 @@ python server.py
 
 浏览器打开 `http://localhost:8765` 即可使用。
 
-### 配置 AI 功能（可选）
+### 配置用户 AI 模型
 
-在 Web 端「AI 配置」页面填写 API Key，或设置环境变量：
+uniCloud 电脑 Web 是唯一用户端。用户登录后在「我的 AI 模型」中独立填写自己的 API Key，并可选择以下五个模型：
 
-```powershell
-# Windows PowerShell
-$env:DEEPSEEK_API_KEY="你的 DeepSeek API Key"
-python server.py
-```
+- `MiniMax-M3[1M]`
+- `deepseek-v4-flash`
+- `deepseek-v4-pro[1m]`
+- `ark-code-latest`
+- `step-router-v1`
+
+密钥使用 AES-256-GCM 按用户加密保存到 `structmind_user_ai_configs`，前端只会收到配置状态和脱敏尾号。服务端固定模型端点，不接受用户填写 Base URL。原有 `DEEPSEEK_API_KEY` 等环境变量只用于本地 FastAPI 开发回退，不参与 uniCloud 生产用户调用。
 
 ```bash
 # Linux / Mac
@@ -84,12 +85,21 @@ SM_AGENT_TIMEOUT_SECONDS=45
 SM_AGENT_MAX_HISTORY_MESSAGES=12
 ```
 
-uniCloud 不保存 Tutor Prompt、不直连 Tutor 模型。部署时必须在 FastAPI 和 `structmind-ai` 云函数中配置同一高强度 `SM_AGENT_SERVICE_KEY`，并在云函数配置 FastAPI 地址：
+uniCloud 不保存 Tutor Prompt，Tutor 仍由 FastAPI Agent 核心执行。部署时必须在 FastAPI 和 `structmind-ai` 云函数中配置同一高强度 `SM_AGENT_SERVICE_KEY` 与 `SM_AGENT_CREDENTIAL_KEY`，并在云函数配置 FastAPI 地址。`SM_AGENT_CREDENTIAL_KEY` 用于加密最长 60 秒、单次使用的用户模型凭据封套：
 
 ```bash
 SM_AGENT_CORE_URL=https://your-fastapi.example.com
 SM_AGENT_SERVICE_KEY=使用密码管理器生成的随机服务凭据
+SM_AGENT_CREDENTIAL_KEY=Base64编码的32字节随机密钥
 ```
+
+仅在 `structmind-ai` 云函数中配置另一把不同的主密钥：
+
+```bash
+SM_USER_AI_MASTER_KEY=Base64编码的32字节随机密钥
+```
+
+部署顺序：上传 `structmind_user_ai_configs.schema.json` 和同名 `.index.json`，配置上述云函数变量，部署 FastAPI Agent 核心，再部署 `structmind-ai` 与 `api` 云函数，最后重新编译并上传 uni-app H5。
 
 `/api/internal/agent/tutor` 仅接受 `X-StructMind-Service-Key`，不会开放本地用户画像工具；Web 用户入口仍使用 Bearer 会话认证和个人 AI 额度。
 
@@ -118,43 +128,22 @@ docker run -p 8765:8765 -e DEEPSEEK_API_KEY="your-key" structmind
 ```
 StructMind/
 ├── server.py                     # Python 后端（HTTP API 服务）
-├── static/                       # Web 前端（静态 SPA）
+├── web/                          # FastAPI Web 工作台（不会被 uni-app 复制进 H5）
 │   ├── index.html
-│   ├── app.js                    # 主逻辑
-│   ├── styles.css                # 设计系统
-│   └── logo.svg                  # 品牌 Logo
-├── pages/                        # uni-app 多端页面
-│   ├── login/login.vue           # 登录
-│   ├── register/register.vue     # 注册
-│   ├── index/index.vue           # 首页
-│   ├── dashboard/dashboard.vue   # 学习画像
-│   ├── practice/practice.vue     # 题库练习
-│   ├── ai/ai.vue                 # AI 导师
-│   ├── wrong/wrong.vue           # 错题本
-│   ├── profile/profile.vue       # 个人中心
-│   └── admin/admin.vue           # 管理审批
-├── components/                   # Vue 组件库（10 个组件）
-│   ├── SmButton.vue
-│   ├── SmCard.vue
-│   ├── SmChat.vue
-│   ├── SmInput.vue
-│   ├── SmModal.vue
-│   ├── SmProgress.vue
-│   ├── SmQuestion.vue
-│   ├── SmRadar.vue
-│   ├── SmTag.vue
-│   └── SmToast.vue
+│   ├── app.js                    # 主逻辑（渲染、状态、流式 AI 对话）
+│   └── styles.css                # 浅绿色学习工作台设计系统
+├── static/                       # 跨端公共资源，仅存放 Logo、TabBar 图标等资产
+├── pages/                        # uni-app 页面（uniCloud 网站的唯一前端入口）
 ├── src/agents/                   # 统一 TutorOrchestrator、TurnContext 与事件协议
 ├── src/ai/gateway.py             # OpenAI 兼容的异步流式模型网关
-├── uniCloud-aliyun/              # uniCloud 云服务
+├── uniCloud-aliyun/              # uniCloud 云服务（后端代理层）
 │   ├── cloudfunctions/           # 云函数；Tutor 仅作为带服务凭据的 FastAPI 代理
 │   └── database/                 # DB Schema（权限配置）
 ├── tests/
 │   └── test_core.py              # 核心功能单元测试
 ├── runtime/                      # 运行时数据
 ├── nginx.conf                    # Nginx 反向代理
-├── Dockerfile                    # Docker 构建
-└── pages.json                    # uni-app 页面路由
+└── Dockerfile                    # Docker 构建
 ```
 
 ## 🔌 API 接口
@@ -220,9 +209,8 @@ python -m pytest tests/test_core.py -v
 | 层级 | 技术 |
 |------|------|
 | 后端 | Python 3.11+, SQLite |
-| Web 前端 | Vanilla JS (ES2020+), CSS OKLCH |
-| 多端框架 | uni-app x (Vue 3 + UTS) |
-| 云服务 | uniCloud (阿里云) |
+| Web 前端 | Vanilla JS (ES2020+), CSS 变量 + 响应式布局 |
+| 云服务 | uniCloud (阿里云，可选代理层) |
 | AI | DeepSeek / 智谱 AI API |
 | 安全 | PBKDF2-SHA256, 速率限制, CORS, CSP |
 | 部署 | Docker, Nginx |

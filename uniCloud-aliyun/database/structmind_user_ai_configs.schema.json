@@ -1,0 +1,23 @@
+{
+  "bsonType": "object",
+  "required": ["user_id", "credentials", "created_at", "updated_at"],
+  "permission": {
+    "read": false,
+    "create": false,
+    "update": false,
+    "delete": false
+  },
+  "properties": {
+    "_id": { "description": "用户AI配置ID" },
+    "user_id": {
+      "bsonType": "string",
+      "title": "用户ID",
+      "foreignKey": "structmind_users._id"
+    },
+    "default_model": { "bsonType": "string", "title": "默认模型" },
+    "credentials": { "bsonType": "object", "title": "加密的平台凭据" },
+    "last_tests": { "bsonType": "object", "title": "最近连接测试状态" },
+    "created_at": { "bsonType": "timestamp" },
+    "updated_at": { "bsonType": "timestamp" }
+  }
+}

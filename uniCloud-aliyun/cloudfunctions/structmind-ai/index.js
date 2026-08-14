@@ -1,15 +1,15 @@
 // @ts-nocheck
 'use strict';
 
+const crypto = require('node:crypto');
+
 /**
  * StructMind AI 云函数
  * 处理：AI题目生成、苏格拉底式辅导、讨论题评分
  *
- * 外部AI API配置：
- *   通过云函数环境变量配置:
- *     SM_AI_API_URL   — AI API 地址
- *     SM_AI_API_KEY   — AI API 密钥
- *     SM_AI_MODEL     — 模型名称 (默认: deepseek-chat)
+ * 用户AI配置：
+ *   API Key 按用户使用 SM_USER_AI_MASTER_KEY 加密保存；服务端模型目录固定端点。
+ *   Tutor 凭据使用 SM_AGENT_CREDENTIAL_KEY 加密后转交 FastAPI Agent 核心。
  */
 
 const db = uniCloud.database();
@@ -19,20 +19,26 @@ const questionsCollection = db.collection('structmind_questions');
 const assignmentsCollection = db.collection('structmind_assignments');
 const discussionsCollection = db.collection('structmind_discussions');
 const conversationsCollection = db.collection('structmind_ai_conversations');
-const conversationSummariesCollection = db.collection('structmind_conversation_summaries');
+const conversationSummariesCollection = db.collection('structmind_conv_summaries');
+const userAIConfigsCollection = db.collection('structmind_user_ai_configs');
+const { createUserAIConfigService } = require('./lib/user-ai-config');
+const { callModel } = require('./lib/model-gateway');
+const { createAgentEnvelope } = require('./lib/credential-crypto');
 let learningRules;
 try { learningRules = require('structmind-learning-rules'); }
 catch (_error) { learningRules = require('../common/structmind-learning-rules'); }
 const SESSION_MAX_AGE_MS = Number(process.env.SM_SESSION_MAX_AGE_MS) || 7 * 24 * 60 * 60 * 1000;
 
-// ── AI API 配置 ──
-const AI_API_URL = process.env.SM_AI_API_URL || 'https://api.deepseek.com/v1/chat/completions';
-const AI_API_KEY = process.env.SM_AI_API_KEY || '';
-const AI_MODEL = process.env.SM_AI_MODEL || 'deepseek-chat';
-
 // Tutor Agent 只允许通过 FastAPI 核心执行；该凭据与终端用户 token 分离。
 const AGENT_CORE_URL = (process.env.SM_AGENT_CORE_URL || '').replace(/\/+$/, '');
 const AGENT_SERVICE_KEY = process.env.SM_AGENT_SERVICE_KEY || '';
+
+function userAIService() {
+  return createUserAIConfigService({
+    collection: userAIConfigsCollection,
+    masterKey: process.env.SM_USER_AI_MASTER_KEY || '',
+  });
+}
 
 // ── 权限验证 ──
 async function requireAuth(token) {
@@ -53,51 +59,26 @@ async function requireAuth(token) {
 }
 
 // ── 调用AI API ──
-async function callAI(messages, options = {}) {
+async function callAI(credential, messages, options = {}) {
   const {
     temperature = 0.7,
     max_tokens = 2048,
     stream = false,
   } = options;
 
-  if (!AI_API_KEY) {
-    throw { code: 503, message: 'AI服务未配置API密钥，请设置SM_AI_API_KEY环境变量' };
-  }
-
-  const requestBody = {
-    model: AI_MODEL,
+  const result = await callModel({
+    httpclient: uniCloud.httpclient,
+    credential,
     messages,
     temperature,
-    max_tokens,
-    stream: false,
-  };
-
-  // 使用 uniCloud HTTP 请求
-  const result = await uniCloud.httpclient.request(AI_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${AI_API_KEY}`,
-    },
-    data: requestBody,
-    dataType: 'json',
-    timeout: 60000,
+    maxTokens: max_tokens,
+    stream,
   });
-
-  if (result.status !== 200) {
-    console.error('AI API error:', result.status, result.data);
-    throw { code: 502, message: 'AI服务调用失败: ' + (result.data?.error?.message || result.status) };
-  }
-
-  const responseData = result.data;
-  if (!responseData.choices || responseData.choices.length === 0) {
-    throw { code: 502, message: 'AI服务返回空结果' };
-  }
-
   return {
-    content: responseData.choices[0].message.content,
-    usage: responseData.usage || {},
-    model: responseData.model,
+    content: result.content,
+    usage: result.usage || {},
+    model: result.model_id,
+    provider_id: result.provider_id,
   };
 }
 
@@ -229,6 +210,52 @@ exports.main = async (event, context) => {
   try {
     switch (action) {
 
+      // ── 当前用户的 AI 配置 ──
+      case 'getAIConfig': {
+        const { userId } = await requireAuth(params.token);
+        return { code: 0, data: await userAIService().getPublicConfig(userId) };
+      }
+
+      case 'saveAIConfig': {
+        const { userId } = await requireAuth(params.token);
+        const data = await userAIService().saveCredential(
+          userId, params.provider_id, params.api_key, params.model_id,
+        );
+        return { code: 0, message: 'AI 配置已安全保存', data };
+      }
+
+      case 'selectAIModel': {
+        const { userId } = await requireAuth(params.token);
+        const data = await userAIService().selectModel(userId, params.model_id);
+        return { code: 0, message: '默认模型已更新', data };
+      }
+
+      case 'deleteAIConfig': {
+        const { userId } = await requireAuth(params.token);
+        const data = await userAIService().deleteCredential(userId, params.provider_id);
+        return { code: 0, message: '平台凭据已删除', data };
+      }
+
+      case 'testAIConnection': {
+        const { userId } = await requireAuth(params.token);
+        const service = userAIService();
+        const credential = await service.resolveUserModel(userId, params.model_id);
+        try {
+          await callAI(credential, [{ role: 'user', content: '请只回复：连接正常' }], {
+            temperature: 0, max_tokens: 16,
+          });
+          const testResult = await service.recordConnectionTest(userId, credential.provider_id, {
+            ok: true, code: 'OK', model_id: credential.model_id,
+          });
+          return { code: 0, message: '连接测试成功', data: testResult };
+        } catch (error) {
+          await service.recordConnectionTest(userId, credential.provider_id, {
+            ok: false, code: error.code || 'AI_PROVIDER_UNAVAILABLE', model_id: credential.model_id,
+          });
+          throw error;
+        }
+      }
+
       // ── AI 题目生成 ──
       case 'generateQuestion': {
         const { user, userId } = await requireAuth(params.token);
@@ -281,7 +308,8 @@ ${extra_requirements ? `额外要求：${extra_requirements}` : ''}
           { role: 'user', content: `请为章节"${chapter}"生成${count}道${typeLabels[type] || type}` },
         ];
 
-        const aiResult = await callAI(messages, { temperature: 0.8, max_tokens: 4096 });
+        const credential = await userAIService().resolveUserModel(userId, params.model);
+        const aiResult = await callAI(credential, messages, { temperature: 0.8, max_tokens: 4096 });
 
         // 解析AI返回的JSON
         let generatedQuestions = [];
@@ -359,6 +387,74 @@ ${extra_requirements ? `额外要求：${extra_requirements}` : ''}
             imported: importResults,
             publish_denied: publishDenied,
             tokens_used: aiResult.usage,
+            provider_id: aiResult.provider_id,
+            model_id: aiResult.model,
+          },
+        };
+      }
+
+      // ── 题目讲解与追问 ──
+      case 'questionAI': {
+        const { userId } = await requireAuth(params.token);
+        if (!params.question_id) throw { code: 400, message: '缺少题目ID' };
+        const result = await questionsCollection.doc(params.question_id).get();
+        if (!result.data.length) throw { code: 404, message: '题目不存在' };
+        const question = result.data[0];
+        const mode = ['explain', 'check', 'ask'].includes(params.mode) ? params.mode : 'explain';
+        const tasks = {
+          explain: '讲解题目涉及的知识点、解题步骤、答案依据和常见错误。',
+          check: '检查题干、选项和参考答案是否自洽，并指出问题。',
+          ask: `回答学生追问：${String(params.message || '').trim()}`,
+        };
+        const credential = await userAIService().resolveUserModel(userId, params.model);
+        const aiResult = await callAI(credential, [
+          { role: 'system', content: '你是数据结构课程助教。使用中文，先给结论，再解释理由。' },
+          { role: 'user', content: JSON.stringify({ task: tasks[mode], question }, null, 0) },
+        ], { temperature: mode === 'check' ? 0 : 0.2, max_tokens: 1600 });
+        return {
+          code: 0,
+          data: {
+            reply: aiResult.content, provider_id: aiResult.provider_id,
+            model_id: aiResult.model, question_id: params.question_id, mode,
+          },
+        };
+      }
+
+      // ── 作业题 AI 评分 ──
+      case 'gradeAssignment': {
+        const { userId } = await requireAuth(params.token);
+        if (!params.assignment_id) throw { code: 400, message: '缺少作业题ID' };
+        if (!String(params.user_answer || '').trim()) throw { code: 400, message: '缺少用户答案' };
+        const result = await assignmentsCollection.doc(params.assignment_id).get();
+        if (!result.data.length) throw { code: 404, message: '作业题不存在' };
+        const assignment = result.data[0];
+        const credential = await userAIService().resolveUserModel(userId, params.model);
+        const aiResult = await callAI(credential, [
+          {
+            role: 'system',
+            content: '你是数据结构作业助教。只输出JSON对象，字段为score(0-10)、verdict、reference_answer、covered_points、missing_points、suggestion。',
+          },
+          {
+            role: 'user',
+            content: JSON.stringify({
+              question: assignment.content || assignment.stem || '',
+              reference_answer: assignment.answer || assignment.reference_answer || '',
+              student_answer: params.user_answer,
+            }),
+          },
+        ], { temperature: 0.2, max_tokens: 1600 });
+        let feedback;
+        try {
+          const match = aiResult.content.match(/\{[\s\S]*\}/);
+          feedback = JSON.parse(match ? match[0] : aiResult.content);
+        } catch (_error) {
+          throw { code: 'AI_PROVIDER_UNAVAILABLE', message: '模型评分结果格式异常，请重试。' };
+        }
+        return {
+          code: 0,
+          data: {
+            feedback, provider_id: aiResult.provider_id,
+            model_id: aiResult.model, assignment_id: params.assignment_id,
           },
         };
       }
@@ -408,6 +504,17 @@ ${extra_requirements ? `额外要求：${extra_requirements}` : ''}
             .map(item => ({ role: item.role, content: item.content }));
         }
 
+        const credential = await userAIService().resolveUserModel(userId, model);
+        const issuedAt = Date.now();
+        const credentialEnvelope = createAgentEnvelope({
+          provider_id: credential.provider_id,
+          model_id: credential.model_id,
+          api_key: credential.api_key,
+          external_user_id: userId,
+          issued_at: issuedAt,
+          expires_at: issuedAt + 60000,
+          nonce: crypto.randomUUID(),
+        }, process.env.SM_AGENT_CREDENTIAL_KEY || '');
         const agentResult = await callTutorAgent({
           external_user_id: userId,
           message,
@@ -416,7 +523,8 @@ ${extra_requirements ? `额外要求：${extra_requirements}` : ''}
           conversation_id,
           question_id,
           mode: mode === 'multi-agent' || mode === 'multi_agent' ? 'multi_agent' : 'standard',
-          model,
+          model: credential.model_id,
+          credential_envelope: credentialEnvelope,
         });
 
         const assistantMessage = agentResult.events
@@ -449,6 +557,8 @@ ${extra_requirements ? `额外要求：${extra_requirements}` : ''}
             protocol: agentResult.protocol,
             events: agentResult.events,
             message: assistantMessage,
+            provider_id: credential.provider_id,
+            model_id: credential.model_id,
             context: {
               chapter,
               question_id,
@@ -518,7 +628,8 @@ ${discussion ? `题目：${discussion.content}` : ''}`;
           { role: 'user', content: userPrompt },
         ];
 
-        const aiResult = await callAI(messages, {
+        const credential = await userAIService().resolveUserModel(userId, params.model);
+        const aiResult = await callAI(credential, messages, {
           temperature: 0.3,
           max_tokens: 2048,
         });
@@ -572,6 +683,8 @@ ${discussion ? `题目：${discussion.content}` : ''}`;
             conversation_id: convId,
             grade: gradeResult,
             tokens_used: aiResult.usage,
+            provider_id: aiResult.provider_id,
+            model_id: aiResult.model,
           },
         };
       }
@@ -635,7 +748,7 @@ ${discussion ? `题目：${discussion.content}` : ''}`;
         return { code: 404, message: '未知操作: ' + action };
     }
   } catch (e) {
-    if (e.code && e.message) return e;
+    if (e.code && e.message) return { code: e.code, message: e.message, data: e.data };
     console.error('AI error:', e);
     return { code: 500, message: 'AI服务出错: ' + (e.message || '未知错误') };
   }

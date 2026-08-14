@@ -177,7 +177,10 @@ def validate_phone(value: str) -> str:
 def make_error_response(exc: Exception) -> tuple[int, dict[str, Any]]:
     """将异常映射为 HTTP 状态码 + 错误响应字典。"""
     from src.ai.providers import AIProviderError
+    from src.ai.credential_envelope import CredentialEnvelopeError
 
+    if isinstance(exc, CredentialEnvelopeError):
+        return 403, {"error": str(exc), "code": exc.code}
     if isinstance(exc, AIProviderError):
         return 502, {"error": str(exc)}
     if isinstance(exc, KeyError):
