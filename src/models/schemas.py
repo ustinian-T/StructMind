@@ -168,6 +168,7 @@ class AgentServiceTutorRequest(BaseModel):
     question_id: str | int | None = None
     mode: Literal["standard", "multi_agent"] = "standard"
     model: str | None = None
+    credential_envelope: dict[str, Any]
 
 
 class QuestionAIRequest(BaseModel):

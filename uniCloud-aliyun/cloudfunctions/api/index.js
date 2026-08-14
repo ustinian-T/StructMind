@@ -188,6 +188,13 @@ async function routeRequest(method, path, payload, token) {
     const gen = result.data?.generated?.[0] || result.data?.final_questions?.[0] || null;
     return ok({ question: gen });
   }
+  if (normalizedPath === '/question/ai' && method === 'POST') {
+    const result = await callFunction('structmind-ai', 'questionAI', {
+      token, question_id: payload.question_id, mode: payload.mode,
+      message: payload.message, model: payload.model,
+    });
+    return ok(result.data || {});
+  }
 
   // ── 讨论 / 作业评分 ──
   if (normalizedPath === '/discussion/grade' && method === 'POST') {
@@ -197,10 +204,12 @@ async function routeRequest(method, path, payload, token) {
     return ok({ feedback: result.data?.grade || null });
   }
   if (normalizedPath === '/assignment/grade' && method === 'POST') {
-    const result = await callFunction('structmind-ai', 'gradeDiscussion', {
-      token, user_answer: payload.answer,
+    const result = await callFunction('structmind-ai', 'gradeAssignment', {
+      token, assignment_id: payload.assignment_id || payload.question_id,
+      user_answer: payload.answer, model: payload.model,
     });
-    return ok({ feedback: result.data?.grade || null });
+    return ok({ feedback: result.data?.feedback || null,
+      provider_id: result.data?.provider_id, model_id: result.data?.model_id });
   }
 
   // ── 统计 / 仪表盘 ──
@@ -224,21 +233,22 @@ async function routeRequest(method, path, payload, token) {
 
   // ── 配置 ──
   if (normalizedPath === '/config' && method === 'GET') {
-    const aiApiKey = process.env.SM_AI_API_KEY || '';
-    return ok({
-      providers: [
-        { id: 'zhipu', label: '智谱AI', ai_configured: false, key_preview: '', models: ['glm-5.1', 'glm-5', 'glm-4.7-flash'] },
-        { id: 'deepseek', label: 'DeepSeek', ai_configured: !!aiApiKey, key_preview: aiApiKey ? aiApiKey.slice(0, 4) + '****' : '', models: ['deepseek-v4-flash', 'deepseek-v4-pro'] },
-      ],
-      default_model: process.env.SM_AI_MODEL || 'deepseek-v4-flash',
-    });
+    const result = await callFunction('structmind-ai', 'getAIConfig', { token });
+    return ok(result.data || {});
   }
   if (normalizedPath === '/config' && method === 'POST') {
-    // 运行时配置（内存在云函数中不持久化，返回当前状态）
-    return ok({
-      providers: [{ id: 'deepseek', label: 'DeepSeek', ai_configured: !!process.env.SM_AI_API_KEY, models: ['deepseek-v4-flash', 'deepseek-v4-pro'] }],
-      default_model: process.env.SM_AI_MODEL || 'deepseek-v4-flash',
-    });
+    let result;
+    if (payload.api_key && payload.provider_id) {
+      result = await callFunction('structmind-ai', 'saveAIConfig', {
+        token, provider_id: payload.provider_id,
+        api_key: payload.api_key, model_id: payload.model_id || payload.model,
+      });
+    } else {
+      result = await callFunction('structmind-ai', 'selectAIModel', {
+        token, model_id: payload.model_id || payload.model,
+      });
+    }
+    return ok(result.data || {});
   }
 
   // ── 讨论题列表 ──

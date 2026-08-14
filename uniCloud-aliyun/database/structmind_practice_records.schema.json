@@ -1,0 +1,43 @@
+{
+  "bsonType": "object",
+  "required": ["user_id", "session_id", "question_id", "user_answer", "created_at"],
+  "permission": {
+    "read": "doc.user_id === auth.uid || auth.role.includes('admin')",
+    "create": "auth.uid != null",
+    "update": "doc.user_id === auth.uid || auth.role.includes('admin')",
+    "delete": "auth.role.includes('admin')"
+  },
+  "properties": {
+    "_id": { "description": "答题记录ID" },
+    "user_id": {
+      "bsonType": "string",
+      "title": "用户ID",
+      "foreignKey": "structmind_users._id"
+    },
+    "session_id": {
+      "bsonType": "string",
+      "title": "练习会话ID",
+      "foreignKey": "structmind_practice_sessions._id"
+    },
+    "question_id": {
+      "bsonType": "string",
+      "title": "题目ID",
+      "foreignKey": "structmind_questions._id"
+    },
+    "question_type": { "bsonType": "string", "title": "题型" },
+    "chapter": { "bsonType": "string", "title": "所属章节" },
+    "difficulty": { "bsonType": "int", "title": "难度级别", "enum": [1, 2, 3, 4, 5] },
+    "user_answer": { "bsonType": "string", "title": "用户答案" },
+    "correct_answer": { "bsonType": "string", "title": "正确答案" },
+    "is_correct": { "bsonType": "bool", "title": "是否正确", "description": "待人工/AI评分的记录可为 null" },
+    "score": { "bsonType": "int", "title": "得分" },
+    "max_score": { "bsonType": "int", "title": "满分" },
+    "time_spent": { "bsonType": "int", "title": "答题耗时(秒)" },
+    "pending_review": { "bsonType": "bool", "title": "是否待人工/AI评分" },
+    "ai_feedback": { "bsonType": "string", "title": "AI评分反馈" },
+    "ai_breakdown": { "bsonType": "object", "title": "AI评分明细" },
+    "graded_by": { "bsonType": "string", "title": "评分方式" },
+    "graded_at": { "bsonType": "timestamp", "title": "评分时间" },
+    "created_at": { "bsonType": "timestamp" }
+  }
+}

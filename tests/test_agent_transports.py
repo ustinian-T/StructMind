@@ -1,14 +1,46 @@
 from __future__ import annotations
 
 import json
+import base64
+import time
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from src.agents.orchestrator import ModelStreamEvent
 from src.db.database import PracticeDatabase
 from src.routes import api_router
+
+
+AGENT_KEY_BYTES = bytes([9]) * 32
+AGENT_KEY_B64 = base64.b64encode(AGENT_KEY_BYTES).decode("ascii")
+
+
+def agent_envelope(user_id: str, nonce: str) -> dict:
+    now = int(time.time() * 1000)
+    payload = {
+        "provider_id": "deepseek",
+        "model_id": "deepseek-v4-flash",
+        "api_key": "test-provider-key",
+        "external_user_id": user_id,
+        "issued_at": now,
+        "expires_at": now + 60_000,
+        "nonce": nonce,
+    }
+    iv = bytes(range(12))
+    encrypted = AESGCM(AGENT_KEY_BYTES).encrypt(
+        iv,
+        json.dumps(payload, separators=(",", ":")).encode(),
+        b"structmind-agent-envelope:v1",
+    )
+    return {
+        "version": 1,
+        "iv": base64.b64encode(iv).decode(),
+        "ciphertext": base64.b64encode(encrypted[:-16]).decode(),
+        "auth_tag": base64.b64encode(encrypted[-16:]).decode(),
+    }
 
 
 class EmptyBank:
@@ -96,8 +128,14 @@ def test_multi_agent_route_is_the_same_streaming_core(tmp_path):
 def test_internal_agent_requires_service_key_before_gateway(tmp_path, monkeypatch):
     app, _token = make_app(tmp_path)
     monkeypatch.setattr("src.routes.deps.AGENT_SERVICE_KEY", "service-secret")
+    monkeypatch.setenv("SM_AGENT_CREDENTIAL_KEY", AGENT_KEY_B64)
     StreamingGateway.calls = 0
-    payload = {"external_user_id": "cloud-user", "message": "解释队列"}
+    payload = {
+        "external_user_id": "cloud-user",
+        "message": "解释队列",
+        "model": "deepseek-v4-flash",
+        "credential_envelope": agent_envelope("cloud-user", "transport-service-key"),
+    }
 
     with TestClient(app) as client:
         missing = client.post("/api/internal/agent/tutor", json=payload)
@@ -124,6 +162,7 @@ def test_internal_agent_requires_service_key_before_gateway(tmp_path, monkeypatc
 def test_web_and_unicloud_service_surface_return_identical_protocol_signatures(tmp_path, monkeypatch):
     app, token = make_app(tmp_path)
     monkeypatch.setattr("src.routes.deps.AGENT_SERVICE_KEY", "service-secret")
+    monkeypatch.setenv("SM_AGENT_CREDENTIAL_KEY", AGENT_KEY_B64)
     with TestClient(app) as client:
         web = client.post(
             "/api/ai/multi-agent/tutor/stream",
@@ -136,6 +175,8 @@ def test_web_and_unicloud_service_surface_return_identical_protocol_signatures(t
                 "external_user_id": "cloud-user",
                 "message": "解释图",
                 "mode": "multi_agent",
+                "model": "deepseek-v4-flash",
+                "credential_envelope": agent_envelope("cloud-user", "protocol-signature"),
             },
             headers={"X-StructMind-Service-Key": "service-secret"},
         )

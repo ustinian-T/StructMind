@@ -140,21 +140,21 @@ export default {
   background: #fff; border-radius: 12px; padding: 12px 14px;
   border: 1px solid #edf2f0; cursor: pointer;
 }
-.sm-chat-example text { font-size: 14px; color: #2d8a7b; }
+.sm-chat-example text { font-size: 14px; color: #477a50; }
 
 /* 消息 */
 .sm-chat-msg { display: flex; gap: 10px; margin-bottom: 16px; }
 .sm-chat-msg.user { flex-direction: row-reverse; }
 .sm-chat-avatar {
   width: 36px; height: 36px; border-radius: 12px; flex-shrink: 0;
-  background: #f5f8f7; display: flex; align-items: center; justify-content: center;
+  background: #edf5e9; display: flex; align-items: center; justify-content: center;
 }
 .sm-chat-bubble {
   max-width: 75%; padding: 10px 14px; border-radius: 16px;
   font-size: 15px; line-height: 1.6;
 }
 .sm-chat-msg.user .sm-chat-bubble {
-  background: linear-gradient(135deg, #2d8a7b, #47b5a3); color: #fff;
+  background: #477a50; color: #fff;
   border-bottom-right-radius: 4px;
 }
 .sm-chat-msg.assistant .sm-chat-bubble {
@@ -176,21 +176,21 @@ export default {
   40% { transform: scale(1); opacity: 1; }
 }
 
-.sm-stream-cursor { animation: sm-blink 1s infinite; color: #2d8a7b; }
+.sm-stream-cursor { animation: sm-blink 1s infinite; color: #477a50; }
 @keyframes sm-blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
 
 /* 输入区 */
 .sm-chat-input-area {
   display: flex; gap: 10px; padding: 12px 16px;
-  background: #fff; border-top: 1px solid #edf2f0; align-items: center;
+  background: #fffefb; border-top: 1px solid #dfe9da; align-items: center;
 }
 .sm-chat-input {
-  flex: 1; height: 44px; background: #f5f8f7; border: 1px solid #dce5e3;
+  flex: 1; height: 44px; background: #fff; border: 1px solid #d8e4d3;
   border-radius: 22px; padding: 0 18px; font-size: 15px;
 }
 .sm-chat-send {
   width: 64px; height: 44px; border-radius: 22px; border: none;
-  background: linear-gradient(135deg, #2d8a7b, #47b5a3); color: #fff;
+  background: #477a50; color: #fff;
   font-weight: 600; display: flex; align-items: center; justify-content: center;
   cursor: pointer;
 }

@@ -296,11 +296,11 @@ export default {
 </script>
 
 <style scoped>
-.dashboard-page { min-height: 100vh; background: #f5f8f7; padding-bottom: 40px; }
+.dashboard-page { min-height: 100vh; background: #f3f7f0; padding-bottom: 40px; }
 
 /* Hero */
 .hero {
-  position: relative; background: linear-gradient(135deg, #2d8a7b 0%, #47b5a3 50%, #5ec9b8 100%);
+  position: relative; background: #3f744a;
   padding: 32px 20px 40px; overflow: hidden;
 }
 .hero-bg { position: absolute; top: -40px; right: -40px; width: 200px; height: 200px; border-radius: 50%; background: rgba(255,255,255,0.06); }
@@ -335,7 +335,7 @@ export default {
   text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.03);
 }
 .ps-num { font-size: 24px; font-weight: 700; color: #1a2b28; }
-.ps-num.accent { color: #2d8a7b; }
+.ps-num.accent { color: #477a50; }
 .ps-label { font-size: 11px; color: #6b8280; }
 
 /* Radar Bars */
@@ -360,9 +360,9 @@ export default {
 .chapter-item { display: flex; flex-direction: column; gap: 4px; }
 .chapter-info { display: flex; justify-content: space-between; }
 .chapter-name { font-size: 13px; color: #4a5c58; }
-.chapter-count { font-size: 13px; font-weight: 600; color: #2d8a7b; }
+.chapter-count { font-size: 13px; font-weight: 600; color: #477a50; }
 .chapter-bar-track { height: 6px; border-radius: 3px; background: #edf2f0; overflow: hidden; }
-.chapter-bar-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, #2d8a7b, #47b5a3); transition: width 0.5s ease; }
+.chapter-bar-fill { height: 100%; border-radius: 3px; background: #6f9a73; transition: width 0.5s ease; }
 
 /* Heatmap */
 .heatmap-header { margin-bottom: 8px; }
@@ -374,7 +374,7 @@ export default {
 .legend-cell.level-1 { background: #b8ddd4; }
 .legend-cell.level-2 { background: #6fc0b0; }
 .legend-cell.level-3 { background: #3ba895; }
-.legend-cell.level-4 { background: #1a5c52; }
+.legend-cell.level-4 { background: #2f5f3d; }
 
 .heatmap { display: flex; flex-wrap: wrap; gap: 3px; }
 .heatmap-cell {
@@ -385,7 +385,7 @@ export default {
 .heatmap-cell.level-1 { background: #b8ddd4; }
 .heatmap-cell.level-2 { background: #6fc0b0; }
 .heatmap-cell.level-3 { background: #3ba895; }
-.heatmap-cell.level-4 { background: #1a5c52; }
+.heatmap-cell.level-4 { background: #2f5f3d; }
 .heatmap-tooltip { font-size: 8px; color: #fff; font-weight: 600; }
 
 /* Wrong Mini */
@@ -394,7 +394,7 @@ export default {
   background: #fff; border-radius: 12px; padding: 10px 14px;
   display: flex; align-items: center; gap: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.03);
 }
-.wrong-mini-chapter { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #e8f5f2; color: #2d8a7b; flex-shrink: 0; }
+.wrong-mini-chapter { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #edf5e9; color: #477a50; flex-shrink: 0; }
 .wrong-mini-stem { flex: 1; font-size: 13px; color: #4a5c58; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wrong-mini-arrow { font-size: 12px; color: #a0b0ac; }
 
@@ -406,7 +406,7 @@ export default {
 .cta-content { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
 .cta-logo {
   width: 56px; height: 56px; border-radius: 16px;
-  background: linear-gradient(135deg, #2d8a7b, #47b5a3); color: #fff;
+  background: #477a50; color: #fff;
   display: flex; align-items: center; justify-content: center;
   font-size: 22px; font-weight: 800; letter-spacing: 2px;
   box-shadow: 0 4px 16px rgba(45,138,123,0.3);

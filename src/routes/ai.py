@@ -17,6 +17,7 @@ from src.models.schemas import (
 )
 from src.ai.client import AIClient, get_ai_client
 from src.ai.gateway import AsyncModelGateway
+from src.ai.credential_envelope import EphemeralCredential, decrypt_agent_envelope
 from src.ai.streaming import sse_stream
 from src.agents import (
     generate_ai_question as agent_generate_question,
@@ -65,9 +66,13 @@ def _agent_budget() -> AgentBudget:
     )
 
 
-def _new_orchestrator(request_or_websocket, model: str | None) -> TutorOrchestrator:
+def _new_orchestrator(
+    request_or_websocket,
+    model: str | None,
+    credential: EphemeralCredential | None = None,
+) -> TutorOrchestrator:
     factory = getattr(request_or_websocket.app.state, "agent_gateway_factory", None)
-    gateway = factory(model) if factory else AsyncModelGateway(model=model)
+    gateway = factory(model) if factory else AsyncModelGateway(model=model, credential=credential)
     return TutorOrchestrator(gateway)
 
 
@@ -395,6 +400,12 @@ async def service_tutor(
     _service=Depends(require_agent_service),
 ):
     """Credentialed uniCloud adapter; FastAPI remains the only Agent core."""
+    credential = decrypt_agent_envelope(
+        req.credential_envelope,
+        expected_user_id=req.external_user_id,
+    )
+    if req.model and req.model != credential.model_id:
+        raise ValueError("Agent 请求模型与用户凭据不匹配。")
     context = TurnContext(
         user_id=f"external:{req.external_user_id}",
         message=req.message,
@@ -403,10 +414,10 @@ async def service_tutor(
         conversation_id=req.conversation_id,
         question_id=req.question_id,
         mode=req.mode,
-        model=req.model,
+        model=credential.model_id,
         budget=_agent_budget(),
     )
-    orchestrator = _new_orchestrator(request, req.model)
+    orchestrator = _new_orchestrator(request, credential.model_id, credential)
     events = [
         event.model_dump(mode="json")
         async for event in orchestrator.stream(context, tool_registry=None)

@@ -54,41 +54,189 @@
 
 <style>
 	:root {
-		--sm-primary: #2d8a7b;
-		--sm-primary-light: #47b5a3;
-		--sm-primary-dark: #1a5c52;
-		--sm-bg: #f5f8f7;
-		--sm-surface: #ffffff;
-		--sm-text: #1a2b28;
-		--sm-muted: #6b8280;
-		--sm-border: #dce5e3;
-		--sm-success: #3cb878;
-		--sm-warning: #e89c35;
-		--sm-danger: #e04a3c;
-		--sm-radius: 16px;
-		--sm-shadow: 0 4px 24px rgba(45, 138, 123, 0.08);
+		--sm-primary: #477a50;
+		--sm-primary-light: #dcebd6;
+		--sm-primary-dark: #2f5f3d;
+		--sm-bg: #f3f7f0;
+		--sm-surface: #fffefb;
+		--sm-surface-muted: #edf5e9;
+		--sm-text: #183229;
+		--sm-muted: #708076;
+		--sm-border: #d8e4d3;
+		--sm-success: #3f7d4d;
+		--sm-warning: #a86e27;
+		--sm-danger: #b84b42;
+		--sm-radius: 14px;
+		--sm-shadow: 0 12px 34px rgba(47, 95, 61, 0.08);
 	}
+	page { background: #f3f7f0; color: #183229; }
 	.uni-row { flex-direction: row; }
 	.uni-column { flex-direction: column; }
 	.sm-btn {
 		display: flex; align-items: center; justify-content: center; gap: 8px;
-		padding: 14px 28px; border-radius: 12px; font-size: 16px; font-weight: 600;
+		padding: 13px 24px; border-radius: 11px; font-size: 15px; font-weight: 600;
 		border: none; cursor: pointer; transition: all 0.2s ease;
 	}
 	.sm-btn-primary {
-		background: linear-gradient(135deg, #2d8a7b, #47b5a3);
-		color: white; box-shadow: 0 4px 16px rgba(45, 138, 123, 0.3);
+		background: #477a50;
+		color: #fff; box-shadow: 0 6px 16px rgba(47, 95, 61, 0.18);
 	}
 	.sm-btn-primary:active { transform: scale(0.97); opacity: 0.9; }
-	.sm-btn-ghost { background: transparent; color: #2d8a7b; border: 1.5px solid #2d8a7b; }
+	.sm-btn-ghost { background: transparent; color: #477a50; border: 1px solid #a9c2a6; }
 	.sm-input {
-		width: 100%; padding: 14px 16px; border: 1.5px solid #dce5e3;
-		border-radius: 12px; font-size: 16px; background: #f9fbfa;
+		width: 100%; padding: 13px 15px; border: 1px solid #d8e4d3;
+		border-radius: 11px; font-size: 15px; background: #fffefb;
 		transition: border-color 0.2s; box-sizing: border-box;
 	}
-	.sm-input:focus { border-color: #2d8a7b; outline: none; background: #fff; }
+	.sm-input:focus { border-color: #6f9a73; outline: none; background: #fff; }
 	.sm-card {
-		background: white; border-radius: 16px; padding: 20px;
-		box-shadow: 0 4px 24px rgba(45, 138, 123, 0.08); border: 1px solid #edf2f0;
+		background: #fffefb; border-radius: 14px; padding: 20px;
+		box-shadow: 0 12px 34px rgba(47, 95, 61, 0.08); border: 1px solid #dfe9da;
 	}
+
+	/* #ifdef H5 */
+	uni-page-body,
+	uni-page-wrapper,
+	.uni-page-wrapper { background: #f3f7f0; }
+
+	@media (min-width: 960px) {
+		uni-app.uni-app--showtabbar uni-page-wrapper {
+			height: 100% !important;
+			padding-left: 232px;
+			padding-bottom: 0 !important;
+			box-sizing: border-box;
+		}
+		uni-app.uni-app--showtabbar uni-page-wrapper::after,
+		uni-app.uni-app--showtabbar uni-page-body::after { display: none !important; }
+
+		uni-app.uni-app--showtabbar uni-page-head .uni-page-head {
+			left: 232px !important;
+			right: 0 !important;
+			width: auto !important;
+			background: rgba(255, 254, 251, 0.94) !important;
+			border-bottom: 1px solid #dfe9da;
+			box-shadow: none !important;
+			backdrop-filter: blur(14px);
+		}
+
+		.uni-tabbar-bottom,
+		.uni-tabbar-bottom .uni-tabbar {
+			top: 0 !important;
+			left: 0 !important;
+			right: auto !important;
+			bottom: 0 !important;
+			width: 232px !important;
+			height: 100vh !important;
+			padding: 92px 14px 20px !important;
+			box-sizing: border-box;
+			flex-direction: column !important;
+			justify-content: flex-start !important;
+			gap: 6px;
+			background: #fffefb !important;
+			border-top: 0 !important;
+			border-right: 1px solid #dfe9da;
+			box-shadow: 8px 0 28px rgba(47, 95, 61, 0.05) !important;
+		}
+		.uni-tabbar-bottom::before,
+		.uni-tabbar-bottom .uni-tabbar::before {
+			content: 'StructMind';
+			position: absolute;
+			top: 28px;
+			left: 28px;
+			color: #2f5f3d;
+			font-size: 20px;
+			font-weight: 750;
+			letter-spacing: -0.4px;
+		}
+		.uni-tabbar__item {
+			flex: 0 0 auto !important;
+			width: 100%;
+			min-height: 54px;
+			border-radius: 11px;
+		}
+		.uni-tabbar__item:hover { background: #edf5e9; }
+
+		.index-page,
+		.dashboard-page,
+		.practice-page,
+		.ai-page,
+		.profile-page,
+		.wrong-page,
+		.admin-page {
+			width: 100%;
+			max-width: 1220px;
+			min-height: 100%;
+			margin: 0 auto;
+			padding: 28px 32px 48px !important;
+			box-sizing: border-box;
+			background: transparent !important;
+		}
+		.index-page .hero-banner,
+		.dashboard-page .hero,
+		.profile-page .profile-header {
+			margin: 0 0 20px !important;
+			border-radius: 18px !important;
+			background: #3f744a !important;
+			box-shadow: 0 18px 40px rgba(47, 95, 61, 0.14);
+		}
+		.index-page .quick-actions,
+		.dashboard-page .quick-section {
+			grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+			padding-left: 0 !important;
+			padding-right: 0 !important;
+		}
+		.profile-page .stats-grid {
+			display: grid !important;
+			grid-template-columns: repeat(4, minmax(0, 1fr));
+			gap: 12px;
+			margin: 0 0 24px !important;
+		}
+		.index-page .profile-cards {
+			flex-direction: row !important;
+			gap: 12px !important;
+		}
+		.sm-btn,
+		.sm-chat-msg,
+		.sm-chat-input-area,
+		.profile-page .type-row,
+		.profile-page .ch-info,
+		.profile-page .menu-item,
+		.profile-page .feedback-row,
+		.practice-page .filter-bar,
+		.practice-page .mode-toggle-row,
+		.practice-page .q-meta,
+		.practice-page .q-footer,
+		.practice-page .swipe-header,
+		.practice-page .swipe-actions,
+		.practice-page .swipe-quick-actions,
+		.practice-page .answer-option,
+		.practice-page .result-head,
+		.practice-page .answer-nav,
+		.practice-page .bottom-actions,
+		.practice-page .mastery-row,
+		.admin-page .stats-row,
+		.admin-page .user-card,
+		.admin-page .user-info,
+		.admin-page .user-actions,
+		.wrong-page .w-meta,
+		.wrong-page .w-answer {
+			flex-direction: row !important;
+		}
+		.profile-page .section,
+		.wrong-page .content,
+		.admin-page .content { padding-left: 0 !important; padding-right: 0 !important; }
+		.practice-page .bottom-actions {
+			position: sticky !important;
+			left: auto !important;
+			right: auto !important;
+			bottom: 18px !important;
+			max-width: 760px;
+			margin: 18px auto 0;
+			border: 1px solid #d8e4d3;
+			border-radius: 14px;
+			box-shadow: 0 14px 34px rgba(47, 95, 61, 0.12) !important;
+		}
+		.ai-page { height: calc(100vh - 44px); }
+	}
+	/* #endif */
 </style>

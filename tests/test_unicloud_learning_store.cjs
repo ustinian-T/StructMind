@@ -9,7 +9,7 @@ const ROOT = path.resolve(__dirname, '..');
 const STORE = path.join(ROOT, 'uniCloud-aliyun/cloudfunctions/common/structmind-learning-store/index.js');
 const COLLECTIONS = [
   'learning_events', 'question_concepts', 'concept_mastery', 'mastery_changes',
-  'review_feedback', 'recommendation_snapshots', 'conversation_summaries', 'learning_notes',
+  'review_feedback', 'reco_snapshots', 'conv_summaries', 'learning_notes',
 ];
 
 function createDb() {

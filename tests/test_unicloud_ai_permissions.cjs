@@ -95,12 +95,19 @@ function createCloud(role) {
 
 function loadAI(cloud) {
   global.uniCloud = cloud.uniCloud;
-  process.env.SM_AI_API_KEY = 'test-key';
+  process.env.SM_USER_AI_MASTER_KEY = Buffer.alloc(32, 7).toString('base64');
   delete require.cache[AI_MODULE];
   return require(AI_MODULE).main;
 }
 
 async function generate(main) {
+  await main({
+    action: 'saveAIConfig',
+    params: {
+      token: 'valid-token', provider_id: 'stepfun', api_key: 'test-key',
+      model_id: 'step-router-v1',
+    },
+  }, {});
   return main({
     action: 'generateQuestion',
     params: {

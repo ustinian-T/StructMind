@@ -111,7 +111,7 @@ export default {
 <style scoped>
 .login-page {
   min-height: 100vh;
-  background: linear-gradient(160deg, #e8f5f2 0%, #f5f8f7 40%, #ffffff 100%);
+  background: #f3f7f0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -136,7 +136,7 @@ export default {
   width: 80px;
   height: 80px;
   border-radius: 22px;
-  box-shadow: 0 8px 32px rgba(45, 138, 123, 0.3);
+  box-shadow: 0 10px 28px rgba(47, 95, 61, 0.16);
   margin-bottom: 12px;
 }
 
@@ -156,12 +156,11 @@ export default {
 .login-card {
   width: 100%;
   max-width: 380px;
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(20px);
-  border-radius: 24px;
+  background: #fffefb;
+  border-radius: 18px;
   padding: 32px 28px;
-  box-shadow: 0 8px 40px rgba(45, 138, 123, 0.1);
-  border: 1px solid rgba(45, 138, 123, 0.08);
+  box-shadow: 0 18px 48px rgba(47, 95, 61, 0.1);
+  border: 1px solid #dfe9da;
 }
 
 .card-title {
@@ -194,8 +193,8 @@ export default {
 .form-input {
   width: 100%;
   height: 48px;
-  background: #f5f8f7;
-  border: 1.5px solid #dce5e3;
+  background: #fff;
+  border: 1px solid #d8e4d3;
   border-radius: 12px;
   padding: 0 16px;
   font-size: 16px;
@@ -204,7 +203,7 @@ export default {
 }
 
 .form-input:focus {
-  border-color: #2d8a7b;
+  border-color: #6f9a73;
   background: #ffffff;
 }
 
@@ -224,7 +223,7 @@ export default {
 .login-btn {
   width: 100%;
   height: 50px;
-  background: linear-gradient(135deg, #2d8a7b, #47b5a3);
+  background: #477a50;
   border-radius: 14px;
   border: none;
   color: white;
@@ -234,7 +233,7 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 20px rgba(45, 138, 123, 0.3);
+  box-shadow: 0 7px 18px rgba(47, 95, 61, 0.18);
   margin-top: 8px;
 }
 
@@ -254,7 +253,7 @@ export default {
 }
 
 .footer-link {
-  color: #2d8a7b;
+  color: #477a50;
   font-size: 14px;
   font-weight: 500;
 }

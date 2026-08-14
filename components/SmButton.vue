@@ -61,28 +61,28 @@ export default {
 
 /* Variants */
 .sm-btn-primary {
-  background: linear-gradient(135deg, #2d8a7b, #47b5a3);
+  background: #477a50;
   color: #fff;
-  box-shadow: 0 4px 20px rgba(45,138,123,0.3);
+  box-shadow: 0 6px 18px rgba(47,95,61,0.18);
 }
-.sm-btn-primary:hover { box-shadow: 0 6px 28px rgba(45,138,123,0.4); transform: translateY(-1px); }
-.sm-btn-primary:active { box-shadow: 0 2px 12px rgba(45,138,123,0.2); }
+.sm-btn-primary:hover { background: #3d6d47; box-shadow: 0 8px 22px rgba(47,95,61,0.22); transform: translateY(-1px); }
+.sm-btn-primary:active { box-shadow: 0 2px 10px rgba(47,95,61,0.16); }
 
 .sm-btn-gradient {
-  background: linear-gradient(135deg, #2d8a7b, #5ec9b8);
+  background: #477a50;
   color: #fff;
-  box-shadow: 0 4px 24px rgba(45,138,123,0.35);
+  box-shadow: 0 6px 18px rgba(47,95,61,0.18);
 }
-.sm-btn-gradient:hover { box-shadow: 0 6px 32px rgba(45,138,123,0.5); transform: translateY(-2px); }
+.sm-btn-gradient:hover { background: #3d6d47; box-shadow: 0 8px 22px rgba(47,95,61,0.22); transform: translateY(-1px); }
 
-.sm-btn-soft { background: rgba(45,138,123,0.08); color: #2d8a7b; }
-.sm-btn-soft:hover { background: rgba(45,138,123,0.14); }
+.sm-btn-soft { background: #edf5e9; color: #477a50; }
+.sm-btn-soft:hover { background: #dfeeda; }
 
-.sm-btn-ghost { background: transparent; color: #4a5c58; border: 1.5px solid #dce5e3; }
-.sm-btn-ghost:hover { border-color: #2d8a7b; color: #2d8a7b; }
+.sm-btn-ghost { background: transparent; color: #3d574c; border: 1px solid #d8e4d3; }
+.sm-btn-ghost:hover { border-color: #7da882; color: #477a50; }
 
-.sm-btn-outline { background: transparent; color: #2d8a7b; border: 1.5px solid #2d8a7b; }
-.sm-btn-outline:hover { background: rgba(45,138,123,0.06); }
+.sm-btn-outline { background: transparent; color: #477a50; border: 1px solid #7da882; }
+.sm-btn-outline:hover { background: #edf5e9; }
 
 .sm-btn-danger { background: #fef2f2; color: #dc2626; }
 .sm-btn-danger:hover { background: #fde8e8; }
@@ -96,7 +96,7 @@ export default {
 }
 .sm-btn-soft .sm-btn-spinner,
 .sm-btn-ghost .sm-btn-spinner {
-  border-color: rgba(45,138,123,0.2); border-top-color: #2d8a7b;
+  border-color: rgba(71,122,80,0.2); border-top-color: #477a50;
 }
 @keyframes sm-spin { to { transform: rotate(360deg); } }
 </style>

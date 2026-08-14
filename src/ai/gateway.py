@@ -10,6 +10,7 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
 from src.ai.client import _get_proxy
+from src.ai.credential_envelope import EphemeralCredential
 from src.ai.providers import ai_api_key, normalize_model, provider_for_model
 from src.config import AI_PROVIDERS, AI_TIMEOUT_SECONDS
 
@@ -32,7 +33,32 @@ class ModelStreamEvent(BaseModel):
 class AsyncModelGateway:
     """Normalize provider streaming chunks into transport-neutral model events."""
 
-    def __init__(self, model: str | None = None, client: AsyncOpenAI | None = None):
+    def __init__(
+        self,
+        model: str | None = None,
+        client: AsyncOpenAI | None = None,
+        credential: EphemeralCredential | None = None,
+    ):
+        self._credential = credential
+        if credential is not None:
+            self.model = credential.model_id
+            self.provider = credential.provider_id
+            if model and model != credential.model_id:
+                raise RuntimeError("Agent 请求模型与用户凭据不匹配。")
+            if credential.protocol == "anthropic":
+                self._client = None
+                return
+            kwargs: dict[str, Any] = {"timeout": AI_TIMEOUT_SECONDS}
+            proxy = _get_proxy()
+            if proxy:
+                kwargs["http_client"] = httpx.AsyncClient(proxy=proxy)
+            self._client = AsyncOpenAI(
+                api_key=credential.api_key,
+                base_url=credential.base_url,
+                **kwargs,
+            )
+            return
+
         self.model = normalize_model(model)
         self.provider = provider_for_model(self.model)
         if client is not None:
@@ -59,8 +85,24 @@ class AsyncModelGateway:
         temperature: float,
         max_tokens: int,
     ) -> AsyncIterator[ModelStreamEvent]:
+        requested_model = model or self.model
+        if self._credential is not None:
+            if requested_model != self.model:
+                raise RuntimeError("Agent 请求模型与用户凭据不匹配。")
+            if self._credential.protocol == "anthropic":
+                async for event in self._stream_anthropic(
+                    messages=messages,
+                    tools=tools,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                ):
+                    yield event
+                return
+        else:
+            requested_model = normalize_model(requested_model)
+
         request: dict[str, Any] = {
-            "model": normalize_model(model) if model else self.model,
+            "model": requested_model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -119,3 +161,111 @@ class AsyncModelGateway:
                 ))
             yield ModelStreamEvent(type="tool_calls", tool_calls=calls)
         yield ModelStreamEvent(type="done", finish_reason=finish_reason or "stop")
+
+    @staticmethod
+    def _anthropic_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
+        system_parts: list[str] = []
+        converted: list[dict[str, Any]] = []
+        for item in messages:
+            role = item.get("role")
+            if role == "system":
+                system_parts.append(str(item.get("content") or ""))
+                continue
+            if role == "assistant":
+                blocks: list[dict[str, Any]] = []
+                if item.get("content"):
+                    blocks.append({"type": "text", "text": str(item["content"])})
+                for call in item.get("tool_calls") or []:
+                    function = call.get("function") or {}
+                    try:
+                        arguments = json.loads(function.get("arguments") or "{}")
+                    except json.JSONDecodeError:
+                        arguments = {}
+                    blocks.append({
+                        "type": "tool_use",
+                        "id": str(call.get("id") or ""),
+                        "name": str(function.get("name") or ""),
+                        "input": arguments,
+                    })
+                converted.append({"role": "assistant", "content": blocks})
+                continue
+            if role == "tool":
+                converted.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": str(item.get("tool_call_id") or ""),
+                        "content": str(item.get("content") or ""),
+                    }],
+                })
+                continue
+            if role == "user":
+                converted.append({"role": "user", "content": str(item.get("content") or "")})
+        return "\n\n".join(part for part in system_parts if part), converted
+
+    async def _stream_anthropic(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        temperature: float,
+        max_tokens: int,
+    ) -> AsyncIterator[ModelStreamEvent]:
+        if self._credential is None:
+            raise RuntimeError("缺少用户模型凭据。")
+        system, converted = self._anthropic_messages(messages)
+        body: dict[str, Any] = {
+            "model": self.model,
+            "messages": converted,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": False,
+        }
+        if system:
+            body["system"] = system
+        if tools:
+            body["tools"] = [{
+                "name": item.get("function", {}).get("name", ""),
+                "description": item.get("function", {}).get("description", ""),
+                "input_schema": item.get("function", {}).get("parameters", {
+                    "type": "object", "properties": {},
+                }),
+            } for item in tools]
+        headers = {"Content-Type": "application/json", "anthropic-version": "2023-06-01"}
+        if self.provider == "deepseek":
+            headers["x-api-key"] = self._credential.api_key
+        else:
+            headers["Authorization"] = f"Bearer {self._credential.api_key}"
+        url = f"{self._credential.base_url.rstrip('/')}/v1/messages"
+        client_kwargs: dict[str, Any] = {"timeout": AI_TIMEOUT_SECONDS}
+        proxy = _get_proxy()
+        if proxy:
+            client_kwargs["proxy"] = proxy
+        async with httpx.AsyncClient(**client_kwargs) as client:
+            response = await client.post(url, headers=headers, json=body)
+        if response.status_code in {401, 403}:
+            raise RuntimeError("API Key 无效或没有该模型权限。")
+        if response.status_code == 429:
+            raise RuntimeError("模型额度不足或请求过于频繁。")
+        if response.status_code < 200 or response.status_code >= 300:
+            raise RuntimeError("模型服务暂时不可用。")
+        data = response.json()
+        usage = data.get("usage") or {}
+        yield ModelStreamEvent(
+            type="usage",
+            input_tokens=int(usage.get("input_tokens") or 0),
+            output_tokens=int(usage.get("output_tokens") or 0),
+        )
+        calls: list[NativeToolCall] = []
+        for block in data.get("content") or []:
+            if block.get("type") == "text" and block.get("text"):
+                yield ModelStreamEvent(type="delta", content=str(block["text"]))
+            elif block.get("type") == "tool_use":
+                calls.append(NativeToolCall(
+                    id=str(block.get("id") or ""),
+                    name=str(block.get("name") or ""),
+                    arguments=block.get("input") if isinstance(block.get("input"), dict) else {},
+                ))
+        if calls:
+            yield ModelStreamEvent(type="tool_calls", tool_calls=calls)
+        yield ModelStreamEvent(type="done", finish_reason=str(data.get("stop_reason") or "stop"))

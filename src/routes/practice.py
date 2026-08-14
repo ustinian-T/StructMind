@@ -153,7 +153,7 @@ async def wrong_questions(request: Request):
         exam_bank = request.app.state.exam_bank
         session = parse_auth_header(request.headers.get("Authorization"), db=db)
         if session:
-            return {"items": db.wrong_attempts(exam_bank)}
+            return {"items": db.wrong_attempts(exam_bank, user_id=int(session["user_id"]))}
         return {"items": []}
     except Exception:
         return {"items": []}

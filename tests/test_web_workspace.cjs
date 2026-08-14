@@ -6,9 +6,9 @@ const path = require('node:path');
 const test = require('node:test');
 
 const ROOT = path.resolve(__dirname, '..');
-const html = fs.readFileSync(path.join(ROOT, 'static/index.html'), 'utf8');
-const app = fs.readFileSync(path.join(ROOT, 'static/app.js'), 'utf8');
-const css = fs.readFileSync(path.join(ROOT, 'static/styles.css'), 'utf8');
+const html = fs.readFileSync(path.join(ROOT, 'web/index.html'), 'utf8');
+const app = fs.readFileSync(path.join(ROOT, 'web/app.js'), 'utf8');
+const css = fs.readFileSync(path.join(ROOT, 'web/styles.css'), 'utf8');
 
 test('web entry exposes accessible product metadata and skip navigation', () => {
   assert.match(html, /name="description"/);
@@ -60,6 +60,27 @@ test('design system covers viewport stability, focus and reduced motion', () => 
   assert.match(css, /\.bottom-nav/);
 });
 
+test('web theme uses a warm light-green learning palette without template styling', () => {
+  assert.match(html, /name="theme-color" content="#f3f7f0"/);
+  assert.match(css, /--bg:\s*#f3f7f0/);
+  assert.match(css, /--surface-subtle:\s*#edf5e9/);
+  assert.match(css, /--primary:\s*#477a50/);
+  assert.match(css, /--ink:\s*#183229/);
+  assert.doesNotMatch(css, /ChatGPT-inspired|"Inter"/i);
+});
+
+test('every web workspace shares polished navigation, forms, feedback and responsive states', () => {
+  for (const selector of [
+    '.learning-home', '.practice-builder', '.question-workspace',
+    '.tutor-workspace', '.review-workspace', '.archive-workspace',
+    '.discussion-workspace', '.table-wrap', '.modal', '.empty', '.result'
+  ]) {
+    assert.match(css, new RegExp(selector.replace('.', '\\\.')));
+  }
+  assert.match(css, /@media \(max-width:\s*47\.99rem\)/);
+  assert.match(css, /@media \(hover:\s*hover\)/);
+});
+
 test('dialogs and startup errors remain accessible and recoverable', () => {
   assert.match(app, /role="dialog" aria-modal="true"/);
   assert.match(app, /aria-label="关闭登录窗口"/);
@@ -75,4 +96,9 @@ test('practice sessions send an optional numeric count accepted by the API schem
   assert.doesNotMatch(app, /count:'all'/);
   assert.doesNotMatch(app, /count:cnt\|\|'all'/);
   assert.match(app, /count:cnt\?Number\(cnt\):null/);
+});
+
+test('practice builder starts with the same ten-question session promised by the dashboard', () => {
+  assert.match(app, /id="pCount"[^>]*value="10"/);
+  assert.match(app, /10 题/);
 });

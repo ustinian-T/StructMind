@@ -1,8 +1,14 @@
 <template>
   <view class="ai-page">
     <view class="page-header">
-      <text class="page-title">AI 导师</text>
-      <text class="page-desc">{{ tutorMode === 'multi-agent' ? '多智能体协作答疑' : '苏格拉底式引导答疑' }}</text>
+      <view>
+        <text class="page-title">AI 导师</text>
+        <text class="page-desc">{{ tutorMode === 'multi-agent' ? '多智能体协作答疑' : '苏格拉底式引导答疑' }}</text>
+      </view>
+      <view class="model-status" @tap="goAISettings">
+        <text class="model-status-label">当前模型</text>
+        <text class="model-status-value">{{ aiConfig.default_model || '点击配置' }}</text>
+      </view>
     </view>
 
     <!-- 导师模式切换 -->
@@ -84,6 +90,7 @@ export default {
       toastVisible: false,
       toastMsg: '',
       toastType: 'info',
+      aiConfig: { default_model: '', ai_configured: false },
       exampleQuestions: [
         '二叉树的三种遍历有什么区别？什么场景用哪种？',
         '哈希表冲突解决有哪些方法？各自的优缺点？',
@@ -92,7 +99,18 @@ export default {
       ],
     }
   },
+  onShow() { this.loadAIConfig() },
   methods: {
+    async loadAIConfig() {
+      const token = getApp().globalData?.token
+      if (!token) return
+      try {
+        this.aiConfig = await callCloud('structmind-ai', 'getAIConfig', { token })
+      } catch (e) {
+        this.aiConfig = { default_model: '', ai_configured: false }
+      }
+    },
+    goAISettings() { uni.navigateTo({ url: '/pages/ai-settings/ai-settings' }) },
     switchMode(mode) {
       if (mode === this.tutorMode) return
       this.tutorMode = mode
@@ -116,6 +134,11 @@ export default {
     async sendMessage() {
       const msg = this.userInput.trim()
       if (!msg || this.streaming) return
+      if (!this.aiConfig.default_model) {
+        this.showToast('请先配置并选择一个 AI 模型', 'error')
+        this.goAISettings()
+        return
+      }
       this.messages.push({ role: 'user', content: msg })
       this.userInput = ''
       this.streaming = true
@@ -150,8 +173,9 @@ export default {
         this.conversationId = data.conversation_id || this.streamConvId
         await this.refreshConversationSummary()
       } catch (err) {
-        this.messages.push({ role: 'assistant', content: '抱歉，AI服务暂时不可用。请检查API配置或网络连接。' })
-        this.showToast('AI服务暂不可用', 'error')
+        const needsConfig = ['AI_CONFIG_REQUIRED', 'AI_PROVIDER_NOT_CONFIGURED', 'AI_CREDENTIAL_INVALID'].includes(err.code)
+        this.messages.push({ role: 'assistant', content: needsConfig ? '当前模型尚未正确配置，请检查 API Key 或重新选择模型。' : '抱歉，AI服务暂时不可用，请稍后重试。' })
+        this.showToast(needsConfig ? '请检查我的 AI 模型' : 'AI服务暂不可用', 'error')
       } finally {
         this.streaming = false
         this.streamContent = ''
@@ -191,7 +215,7 @@ export default {
 <style scoped>
 .ai-page {
   min-height: 100vh;
-  background: #f5f8f7;
+  background: #f3f7f0;
   display: flex;
   flex-direction: column;
 }
@@ -199,9 +223,17 @@ export default {
   padding: 12px 16px 8px;
   background: #fff;
   border-bottom: 1px solid #edf2f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
 }
 .page-title { font-size: 20px; font-weight: 700; color: #1a2b28; display: block; }
 .page-desc { font-size: 13px; color: #6b8280; margin-top: 2px; display: block; }
+.model-status { max-width: 48%; padding: 8px 12px; border-radius: 12px; border: 1px solid #dce8d9; background: linear-gradient(135deg, #f4faf1, #edf7ec); }
+.model-status-label, .model-status-value { display: block; text-align: right; }
+.model-status-label { color: #83968a; font-size: 10px; }
+.model-status-value { margin-top: 2px; color: #3e744b; font-size: 12px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Mode Switch Bar */
 .mode-switch-bar {
@@ -213,13 +245,13 @@ export default {
   font-weight: 500; color: #6b8280; transition: all 0.2s;
 }
 .mode-switch-item.active {
-  background: linear-gradient(135deg, #2d8a7b, #47b5a3); color: #fff;
+  background: #477a50; color: #fff;
   font-weight: 600;
 }
 
 .new-chat-btn {
-  padding: 6px 12px; border-radius: 16px; background: #f5f8f7;
-  border: 1px solid #dce5e3; margin-right: 8px;
+  padding: 6px 12px; border-radius: 12px; background: #fffefb;
+  border: 1px solid #d8e4d3; margin-right: 8px;
 }
 .new-chat-btn text { font-size: 12px; color: #6b8280; }
 .conv-status { padding: 6px 16px 12px; }

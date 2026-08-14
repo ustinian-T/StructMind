@@ -106,7 +106,7 @@
       <!-- Grading result -->
       <view v-if="answerResult" class="answer-result" :class="answerResult.is_correct ? 'correct' : 'wrong'">
         <view class="result-head">
-          <text class="result-icon">{{ answerResult.is_correct ? '✅' : '❌' }}</text>
+          <text class="result-icon">{{ answerResult.is_correct ? '✓' : '×' }}</text>
           <text class="result-title">{{ answerResult.is_correct ? '回答正确！' : '回答错误' }}</text>
         </view>
         <view class="result-line" v-if="answerResult.correct_answer">
@@ -179,9 +179,21 @@
             <text class="q-start-btn">开始答题</text>
           </view>
         </view>
-        <view class="empty" v-if="filteredQuestions.length === 0">
-          <text class="empty-icon">📚</text>
-          <text class="empty-text">暂无该类型的题目</text>
+        <view class="empty" v-if="loadingQuestions">
+          <view class="empty-pulse"></view>
+          <text class="empty-title">正在准备题库</text>
+          <text class="empty-text">正在同步章节与练习题，请稍候</text>
+        </view>
+        <view class="empty empty-error" v-else-if="loadError">
+          <text class="empty-kicker">连接未完成</text>
+          <text class="empty-title">题库暂时没有加载成功</text>
+          <text class="empty-text">{{ loadError }}</text>
+          <view class="empty-retry" @tap="loadQuestions()"><text>重新加载</text></view>
+        </view>
+        <view class="empty" v-else-if="filteredQuestions.length === 0">
+          <text class="empty-kicker">当前筛选</text>
+          <text class="empty-title">没有匹配的题目</text>
+          <text class="empty-text">换一个题型或章节再试试</text>
         </view>
       </scroll-view>
 
@@ -234,7 +246,7 @@
     </view>
 
     <!-- 底部快捷按钮（浏览模式下显示） -->
-    <view class="bottom-actions" v-if="!answerMode">
+    <view class="bottom-actions" v-if="!answerMode && !loadingQuestions && !loadError">
       <SmButton variant="primary" block icon="" @click="startRandom10">随机10题</SmButton>
       <SmButton variant="gradient" block @click="startRecommend">智能推荐</SmButton>
     </view>
@@ -255,6 +267,8 @@ export default {
     return {
       questions: Array(),
       sessionId: null,
+      loadingQuestions: true,
+      loadError: '',
       types: ['单选题', '多选题', '填空题', '判断题'],
       activeType: '',
       activeChapter: '',
@@ -327,6 +341,8 @@ export default {
   },
   methods: {
     async loadQuestions(mode = 'sequence', limit = 200, includeWrong = false) {
+      this.loadingQuestions = true
+      this.loadError = ''
       try {
         const app = getApp()
         const token = app.globalData?.token
@@ -345,7 +361,10 @@ export default {
         const chSet = new Set(this.questions.map(q => q.chapter).filter(Boolean))
         this.chapters = [...chSet].sort()
       } catch (err) {
-        console.log('Failed to load questions')
+        this.questions = []
+        this.loadError = '请检查网络或重新登录后再试。若持续失败，请确认题库云函数已部署。'
+      } finally {
+        this.loadingQuestions = false
       }
     },
     setType(type) {
@@ -578,7 +597,7 @@ export default {
 </script>
 
 <style scoped>
-.practice-page { min-height: 100vh; background: #f5f8f7; padding-bottom: 120px; }
+.practice-page { min-height: 100vh; background: #f3f7f0; padding-bottom: 120px; }
 
 .page-header { padding: 16px 16px 4px; }
 .page-title { font-size: 20px; font-weight: 700; color: #1a2b28; display: block; }
@@ -592,7 +611,7 @@ export default {
   background: #fff; border: 1px solid #dce5e3; font-size: 13px;
   color: #6b8280; white-space: nowrap; transition: all 0.2s;
 }
-.filter-item.active { background: #2d8a7b; border-color: #2d8a7b; color: #fff; }
+.filter-item.active { background: #477a50; border-color: #477a50; color: #fff; }
 .chapter-filter { font-size: 12px; padding: 6px 12px; }
 
 /* Mode Toggle */
@@ -600,7 +619,7 @@ export default {
 .mode-toggle-row { display: flex; justify-content: space-between; align-items: center; }
 .mode-result { font-size: 13px; color: #6b8280; }
 .mode-btn {
-  padding: 6px 14px; border-radius: 20px; background: #e8f5f2; color: #2d8a7b;
+  padding: 6px 14px; border-radius: 20px; background: #edf5e9; color: #477a50;
   font-size: 13px; font-weight: 500;
 }
 .mode-btn.danger { background: #fef2f2; color: #dc2626; }
@@ -614,7 +633,7 @@ export default {
 }
 .q-card:active { transform: scale(0.98); }
 .q-meta { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
-.q-tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #e8f5f2; color: #2d8a7b; }
+.q-tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #edf5e9; color: #477a50; }
 .q-tag.type { background: #e8f0f5; color: #3b6f9e; }
 .q-tag.difficulty { background: #fef3c7; color: #a16207; }
 .q-tag.source { background: #f5f5f5; color: #a0b0ac; }
@@ -622,12 +641,26 @@ export default {
 .q-stem.full { font-size: 16px; line-height: 1.7; }
 .q-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
 .q-source { font-size: 11px; color: #a0b0ac; }
-.q-start-btn { font-size: 12px; color: #2d8a7b; font-weight: 600; }
+.q-start-btn { font-size: 12px; color: #477a50; font-weight: 600; }
 
 /* Empty */
-.empty { padding: 40px 20px; text-align: center; }
-.empty-icon { font-size: 48px; display: block; margin-bottom: 8px; }
-.empty-text { font-size: 15px; color: #6b8280; }
+.empty {
+  max-width: 520px; margin: 28px auto; padding: 34px 28px; text-align: center;
+  background: #fff; border: 1px solid #e0e8dc; border-radius: 18px;
+  box-shadow: 0 14px 40px rgba(50, 82, 58, 0.08);
+}
+.empty-kicker { display: block; color: #477a50; font-size: 12px; font-weight: 700; letter-spacing: 1px; }
+.empty-title { display: block; margin-top: 8px; color: #1a2b28; font-size: 20px; font-weight: 700; }
+.empty-text { display: block; margin-top: 8px; font-size: 14px; line-height: 1.7; color: #6b8280; }
+.empty-retry {
+  display: inline-flex; margin-top: 18px; padding: 10px 22px; border-radius: 12px;
+  background: #477a50; color: #fff; font-size: 14px; font-weight: 700;
+}
+.empty-pulse {
+  width: 28px; height: 28px; margin: 0 auto 6px; border-radius: 50%;
+  background: #b7d5ad; animation: emptyPulse 1.25s ease-in-out infinite;
+}
+@keyframes emptyPulse { 50% { transform: scale(0.72); opacity: 0.45; } }
 
 /* Swipe Mode */
 .swipe-container { padding: 8px 16px; display: flex; flex-direction: column; gap: 12px; }
@@ -651,10 +684,10 @@ export default {
 .swipe-quick-actions { display: flex; gap: 10px; }
 .swipe-btn {
   flex: 1; padding: 12px; border-radius: 14px; text-align: center;
-  background: #f5f8f7; border: 1px solid #dce5e3; font-size: 14px;
+  background: #f3f7f0; border: 1px solid #d8e4d3; font-size: 14px;
   font-weight: 600; color: #4a5c58;
 }
-.swipe-btn.start { background: linear-gradient(135deg, #2d8a7b, #47b5a3); color: #fff; border: none; }
+.swipe-btn.start { background: #477a50; color: #fff; border: none; }
 
 /* ═══ Answer Mode ═══ */
 .answer-view {
@@ -677,22 +710,22 @@ export default {
 .answer-option {
   display: flex; align-items: flex-start; gap: 12px;
   padding: 14px 16px; border: 1.5px solid #dce5e3; border-radius: 12px;
-  background: #f5f8f7; transition: all 0.15s ease;
+  background: #fffefb; transition: all 0.15s ease;
 }
 .answer-option:active { transform: scale(0.98); }
 .answer-option.selected {
-  border-color: #2d8a7b; background: rgba(45,138,123,0.04);
+  border-color: #6f9a73; background: #f3f8f0;
 }
 .option-radio {
   width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
   border: 2px solid #dce5e3; background: #fff; margin-top: 1px;
 }
-.option-radio.checked { background: #2d8a7b; border-color: #2d8a7b; color: #fff; }
+.option-radio.checked { background: #477a50; border-color: #477a50; color: #fff; }
 .option-radio.multi { border-radius: 6px; }
 .option-radio text { font-size: 12px; font-weight: 700; }
 .option-text { font-size: 15px; color: #1a2b28; line-height: 1.5; }
-.option-key { font-weight: 700; color: #2d8a7b; }
+.option-key { font-weight: 700; color: #477a50; }
 
 /* Answer text input */
 .answer-input-area { padding: 4px 0; }
@@ -731,7 +764,7 @@ export default {
 .nav-btn {
   flex: 1; max-width: 140px; padding: 12px 0; border-radius: 14px;
   text-align: center; font-size: 14px; font-weight: 600;
-  background: #f5f8f7; border: 1px solid #dce5e3; color: #4a5c58;
+  background: #f3f7f0; border: 1px solid #d8e4d3; color: #3d574c;
 }
 .nav-btn.exit { background: #fef2f2; border-color: #fecaca; color: #dc2626; }
 
@@ -746,6 +779,6 @@ export default {
 .learning-proof { margin-top: 14px; padding-top: 14px; border-top: 1px solid #dce5e3; display: flex; flex-direction: column; gap: 8px; }
 .proof-title { font-size: 14px; font-weight: 700; color: #1a2b28; }
 .proof-line { font-size: 12px; line-height: 1.6; color: #4a5c58; }
-.mastery-row { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: #2d8a7b; }
-.recommend-proof { padding: 12px; border-radius: 12px; background: #e8f5f2; display: flex; flex-direction: column; gap: 8px; }
+.mastery-row { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: #477a50; }
+.recommend-proof { padding: 12px; border-radius: 12px; background: #edf5e9; display: flex; flex-direction: column; gap: 8px; }
 </style>

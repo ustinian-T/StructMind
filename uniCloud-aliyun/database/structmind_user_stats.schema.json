@@ -1,0 +1,43 @@
+{
+  "bsonType": "object",
+  "required": ["user_id", "created_at", "updated_at"],
+  "permission": {
+    "read": "doc.user_id === auth.uid || auth.role.includes('admin')",
+    "create": "auth.uid != null",
+    "update": "doc.user_id === auth.uid || auth.role.includes('admin')",
+    "delete": "auth.role.includes('admin')"
+  },
+  "properties": {
+    "_id": { "description": "用户统计ID" },
+    "user_id": {
+      "bsonType": "string",
+      "title": "用户ID",
+      "foreignKey": "structmind_users._id"
+    },
+    "total_questions_attempted": { "bsonType": "int", "title": "累计答题数", "defaultValue": 0 },
+    "total_correct": { "bsonType": "int", "title": "累计正确数", "defaultValue": 0 },
+    "total_wrong": { "bsonType": "int", "title": "累计错误数", "defaultValue": 0 },
+    "current_streak": { "bsonType": "int", "title": "当前连对次数", "defaultValue": 0 },
+    "longest_streak": { "bsonType": "int", "title": "最长连对次数", "defaultValue": 0 },
+    "total_practice_time": { "bsonType": "int", "title": "累计练习时长(秒)", "defaultValue": 0 },
+    "chapter_stats": { "bsonType": "object", "title": "章节统计" },
+    "type_stats": { "bsonType": "object", "title": "题型统计" },
+    "last_practice_at": { "bsonType": "timestamp", "title": "最近练习时间" },
+    "daily_goal": { "bsonType": "int", "title": "每日目标题数" },
+    "focus_chapters": {
+      "bsonType": "array",
+      "title": "关注章节",
+      "items": { "bsonType": "string" }
+    },
+    "preferred_difficulty": { "bsonType": "int", "title": "偏好难度" },
+    "notification_enabled": { "bsonType": "bool", "title": "是否开启通知" },
+    "notification_time": { "bsonType": "string", "title": "通知时间(HH:mm)" },
+    "notification_types": {
+      "bsonType": "array",
+      "title": "通知类型",
+      "items": { "bsonType": "string" }
+    },
+    "created_at": { "bsonType": "timestamp" },
+    "updated_at": { "bsonType": "timestamp" }
+  }
+}

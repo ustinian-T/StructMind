@@ -1,0 +1,28 @@
+{
+  "bsonType": "object",
+  "required": ["user_id", "client_id", "created_at", "updated_at"],
+  "permission": {
+    "read": "doc.user_id === auth.uid || auth.role.includes('admin')",
+    "create": "auth.uid != null",
+    "update": "doc.user_id === auth.uid || auth.role.includes('admin')",
+    "delete": "doc.user_id === auth.uid || auth.role.includes('admin')"
+  },
+  "properties": {
+    "_id": { "description": "设备记录ID" },
+    "user_id": {
+      "bsonType": "string",
+      "title": "用户ID",
+      "foreignKey": "structmind_users._id"
+    },
+    "client_id": { "bsonType": "string", "title": "uniPush clientid" },
+    "platform": {
+      "bsonType": "string",
+      "title": "平台",
+      "enum": ["ios", "android", "web", "unknown"]
+    },
+    "enabled": { "bsonType": "bool", "title": "是否启用", "defaultValue": true },
+    "created_at": { "bsonType": "timestamp" },
+    "last_active_at": { "bsonType": "timestamp", "title": "最近活跃时间" },
+    "updated_at": { "bsonType": "timestamp" }
+  }
+}
