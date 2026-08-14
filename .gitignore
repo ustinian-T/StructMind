@@ -8,3 +8,5 @@ unpackage/
 node_modules/
 dist/
 .env
+.playwright-cli/
+output/

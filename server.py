@@ -25,7 +25,8 @@ from fastapi.staticfiles import StaticFiles
 
 from src.config import (
     ROOT,
-    STATIC_DIR,
+    WEB_DIR,
+    PUBLIC_DIR,
     RUNTIME_DIR,
     ASSET_DIR,
     DB_PATH,
@@ -174,22 +175,23 @@ async def serve_spa(full_path: str):
     if ".." in clean or clean.startswith("/"):
         return Response(status_code=403)
 
-    file_path = STATIC_DIR / (clean or "index.html")
-    try:
-        resolved = file_path.resolve()
-        if not str(resolved).startswith(str(STATIC_DIR.resolve())):
-            return Response(status_code=403)
-        file_path = resolved
-    except (ValueError, OSError):
-        file_path = STATIC_DIR / "index.html"
+    for base_dir in (WEB_DIR, PUBLIC_DIR):
+        file_path = base_dir / (clean or "index.html")
+        try:
+            resolved = file_path.resolve()
+            if not str(resolved).startswith(str(base_dir.resolve())):
+                return Response(status_code=403)
+            file_path = resolved
+        except (ValueError, OSError):
+            continue
 
-    if file_path.exists() and file_path.is_file():
-        data = file_path.read_bytes()
-        content_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
-        return Response(content=data, media_type=content_type)
+        if file_path.exists() and file_path.is_file():
+            data = file_path.read_bytes()
+            content_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
+            return Response(content=data, media_type=content_type)
 
     # 最终 fallback 到 index.html（SPA 路由）
-    index_path = STATIC_DIR / "index.html"
+    index_path = WEB_DIR / "index.html"
     if index_path.exists():
         return Response(content=index_path.read_bytes(), media_type="text/html")
 

@@ -6,8 +6,8 @@ const path = require('node:path');
 const test = require('node:test');
 
 const ROOT = path.resolve(__dirname, '..');
-const app = fs.readFileSync(path.join(ROOT, 'static/app.js'), 'utf8');
-const css = fs.readFileSync(path.join(ROOT, 'static/styles.css'), 'utf8');
+const app = fs.readFileSync(path.join(ROOT, 'web/app.js'), 'utf8');
+const css = fs.readFileSync(path.join(ROOT, 'web/styles.css'), 'utf8');
 
 test('web answer submissions use one stable idempotency token with timing context', () => {
   assert.match(app, /attemptTokens/);

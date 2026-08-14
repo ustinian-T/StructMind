@@ -9,7 +9,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DOCX_PATH = ROOT / "数据结构期末考试题库.docx"
 ASSIGNMENT_DOCX_PATH = ROOT / "期末考试作业题库.docx"
-STATIC_DIR = ROOT / "static"
+WEB_DIR = ROOT / "web"
+PUBLIC_DIR = ROOT / "static"
+# Backward-compatible alias for extensions that still import STATIC_DIR.
+STATIC_DIR = PUBLIC_DIR
 RUNTIME_DIR = ROOT / "runtime"
 ASSET_DIR = RUNTIME_DIR / "assets"
 DB_PATH = RUNTIME_DIR / "practice.sqlite3"

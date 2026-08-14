@@ -6,6 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const ROOT = path.resolve(__dirname, '..');
+const read = relativePath => fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
 const PAGE_FILES = [
   'pages/login/login.vue',
   'pages/register/register.vue',
@@ -56,4 +57,64 @@ test('page scripts remain valid JavaScript after cloud migration', () => {
       .replace(/export\s+default/, 'return');
     assert.doesNotThrow(() => new Function(executable), relativePath);
   }
+});
+
+test('uniCloud build has one frontend source and never copies the FastAPI SPA as static assets', () => {
+  for (const file of ['index.html', 'app.js', 'styles.css']) {
+    assert.equal(fs.existsSync(path.join(ROOT, 'static', file)), false, `static/${file}`);
+    assert.equal(fs.existsSync(path.join(ROOT, 'web', file)), true, `web/${file}`);
+  }
+  const server = read('server.py');
+  assert.match(server, /WEB_DIR/);
+  assert.match(server, /PUBLIC_DIR/);
+});
+
+test('App keeps shared light-green design tokens', () => {
+  const app = read('App.uvue');
+  assert.match(app, /--sm-bg:\s*#f3f7f0/);
+  assert.match(app, /--sm-primary:\s*#477a50/);
+});
+
+test('desktop shell owns vertical scrolling and keeps the scrollbar usable', () => {
+  const desktop = read('static/desktop.css');
+  assert.match(desktop, /uni-page-wrapper\s*\{[\s\S]*overflow-y:\s*auto/);
+  assert.match(desktop, /scrollbar-width:\s*thin/);
+  assert.match(desktop, /::-webkit-scrollbar-thumb/);
+  assert.match(desktop, /overscroll-behavior-y:\s*contain/);
+});
+
+test('home page provides restrained ambient particles, light effects and glass actions', () => {
+  const home = read('pages/index/index.vue');
+  const desktop = read('static/desktop.css');
+  assert.match(home, /class="hero-particles"/);
+  assert.match(home, /class="particle p1"/);
+  assert.match(home, /class="hero-orbit/);
+  assert.match(desktop, /@keyframes\s+smParticleFloat/);
+  assert.match(desktop, /\.index-page \.hero-banner[\s\S]*radial-gradient/);
+  assert.match(desktop, /\.index-page \.action-card[\s\S]*backdrop-filter:\s*blur/);
+  assert.match(desktop, /\.prompt-btn[\s\S]*backdrop-filter:\s*blur/);
+});
+
+test('primary uni-app pages use source-specific desktop containers and avoid decorative emoji', () => {
+  const forbidden = /[📝🤖🎯📖📊🔍🎉🔐✅❌📚📋]/u;
+  for (const relativePath of PAGE_FILES) {
+    const source = read(relativePath);
+    assert.doesNotMatch(source, forbidden, relativePath);
+  }
+});
+
+test('H5 template loads an unscoped desktop shell that can style uni-app runtime chrome', () => {
+  const template = read('index.html');
+  const desktopCssPath = path.join(ROOT, 'static', 'desktop.css');
+
+  assert.match(template, /href="\/static\/desktop\.css\?v=[^"]+"/);
+  assert.equal(fs.existsSync(desktopCssPath), true, 'static/desktop.css');
+
+  const desktop = fs.readFileSync(desktopCssPath, 'utf8');
+  assert.match(desktop, /@media\s*\(min-width:\s*900px\)/);
+  assert.match(desktop, /\.uni-tabbar-bottom/);
+  assert.match(desktop, /uni-page-wrapper/);
+  assert.match(desktop, /grid-template-columns:\s*repeat\(4,/);
+  assert.match(desktop, /\.ai-page\s+\.mode-switch-bar/);
+  assert.doesNotMatch(desktop, /\[data-v-/);
 });

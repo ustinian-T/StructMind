@@ -46,7 +46,7 @@
       </button>
 
       <view class="notice-box">
-        <text class="notice-text">📋 注册后需等待管理员审批通过方可登录使用</text>
+        <text class="notice-text">注册后需等待管理员审批通过方可登录使用</text>
       </view>
     </form>
   </view>
@@ -113,7 +113,7 @@ export default {
 <style scoped>
 .register-page {
   min-height: 100vh;
-  background: linear-gradient(160deg, #e8f5f2 0%, #f5f8f7 40%, #ffffff 100%);
+  background: #f3f7f0;
   display: flex;
   flex-direction: column;
   padding: 0 24px 40px;
@@ -138,7 +138,7 @@ export default {
 
 .back-icon {
   font-size: 20px;
-  color: #2d8a7b;
+  color: #477a50;
   font-weight: 700;
 }
 
@@ -154,12 +154,11 @@ export default {
   width: 100%;
   max-width: 380px;
   align-self: center;
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(20px);
-  border-radius: 24px;
+  background: #fffefb;
+  border-radius: 18px;
   padding: 28px 24px;
-  box-shadow: 0 8px 40px rgba(45, 138, 123, 0.1);
-  border: 1px solid rgba(45, 138, 123, 0.08);
+  box-shadow: 0 18px 48px rgba(47, 95, 61, 0.1);
+  border: 1px solid #dfe9da;
 }
 
 .card-title { font-size: 22px; font-weight: 700; color: #1a2b28; display: block; margin-bottom: 4px; }
@@ -168,10 +167,10 @@ export default {
 .form-group { margin-bottom: 16px; }
 .form-label { font-size: 14px; font-weight: 600; color: #4a5c58; display: block; margin-bottom: 6px; }
 .form-input {
-  width: 100%; height: 46px; background: #f5f8f7; border: 1.5px solid #dce5e3;
+  width: 100%; height: 46px; background: #fff; border: 1px solid #d8e4d3;
   border-radius: 12px; padding: 0 14px; font-size: 16px; color: #1a2b28; box-sizing: border-box;
 }
-.form-input:focus { border-color: #2d8a7b; background: #ffffff; }
+.form-input:focus { border-color: #6f9a73; background: #ffffff; }
 
 .error-msg { background: #fef2f2; border: 1px solid #fecaca; border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; }
 .error-msg text { color: #dc2626; font-size: 13px; }
@@ -180,10 +179,10 @@ export default {
 .success-msg text { color: #16a34a; font-size: 13px; }
 
 .register-btn {
-  width: 100%; height: 50px; background: linear-gradient(135deg, #2d8a7b, #47b5a3);
+  width: 100%; height: 50px; background: #477a50;
   border-radius: 14px; border: none; color: white; font-size: 17px; font-weight: 600;
   letter-spacing: 4px; display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 4px 20px rgba(45, 138, 123, 0.3); margin-top: 4px;
+  box-shadow: 0 7px 18px rgba(47, 95, 61, 0.18); margin-top: 4px;
 }
 .register-btn:active { opacity: 0.85; transform: scale(0.98); }
 .register-btn[disabled] { opacity: 0.5; }

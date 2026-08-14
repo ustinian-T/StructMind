@@ -25,6 +25,16 @@ test('mobile answer loop sends idempotency and timing evidence', () => {
   assert.match(cloud, /conditions\._id = db\.command\.in\(question_ids\)/);
 });
 
+test('practice library exposes loading failures and a retry action instead of a silent zero state', () => {
+  const source = read('pages/practice/practice.vue');
+  assert.match(source, /loadingQuestions/);
+  assert.match(source, /loadError/);
+  assert.match(source, /题库暂时没有加载成功/);
+  assert.match(source, /重新加载/);
+  assert.match(source, /@tap="loadQuestions\(\)"/);
+  assert.doesNotMatch(source, /console\.log\('Failed to load questions'\)/);
+});
+
 test('mobile learning archive exposes plan reviews and editable notes', () => {
   const source = read('pages/profile/profile.vue');
   for (const token of ['getPlan', 'savePlan', 'getReviews', 'reviewFeedback', 'listNotes', 'createNote', 'updateNote']) {

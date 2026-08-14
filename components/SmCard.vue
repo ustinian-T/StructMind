@@ -34,15 +34,13 @@ export default {
 
 <style scoped>
 .sm-card {
-  background: #fff; border-radius: 20px; padding: 20px;
-  border: 1px solid #edf2f0; box-shadow: 0 4px 24px rgba(45,138,123,0.06);
+  background: #fffefb; border-radius: 14px; padding: 20px;
+  border: 1px solid #dfe9da; box-shadow: 0 12px 32px rgba(47,95,61,0.07);
   transition: all 0.25s ease;
 }
 .sm-card-glass {
-  background: rgba(255,255,255,0.78);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255,255,255,0.5);
+  background: #fffefb;
+  border: 1px solid #dfe9da;
 }
 .sm-card-flat { box-shadow: none; border: 1px solid #edf2f0; }
 .sm-card-clickable:active { transform: scale(0.98); opacity: 0.9; }

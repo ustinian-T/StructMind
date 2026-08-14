@@ -1,7 +1,7 @@
 <template>
   <view class="admin-page">
     <view class="admin-header">
-      <text class="header-title">🔐 管理审批</text>
+      <text class="header-title">管理审批</text>
       <text class="header-desc">审批新用户注册申请</text>
     </view>
 
@@ -17,7 +17,7 @@
     </view>
 
     <view class="empty-state" v-if="pendingUsers.length === 0 && !loading">
-      <text class="empty-icon">✅</text>
+      <text class="empty-icon">✓</text>
       <text class="empty-text">没有待审批的申请</text>
     </view>
 
@@ -136,7 +136,7 @@ export default {
 <style scoped>
 .admin-page {
   min-height: 100vh;
-  background: #f5f8f7;
+  background: #f3f7f0;
   padding: 20px 16px 40px;
 }
 
@@ -178,7 +178,7 @@ export default {
 .stat-num {
   font-size: 32px;
   font-weight: 700;
-  color: #2d8a7b;
+  color: #477a50;
 }
 
 .stat-label {
@@ -225,8 +225,8 @@ export default {
   width: 44px;
   height: 44px;
   border-radius: 14px;
-  background: linear-gradient(135deg, #e0f0ec, #c8e4dd);
-  color: #2d8a7b;
+  background: #edf5e9;
+  color: #477a50;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -254,8 +254,8 @@ export default {
   padding: 2px 8px;
   border-radius: 20px;
   margin-left: 6px;
-  background: #e0f0ec;
-  color: #2d8a7b;
+  background: #edf5e9;
+  color: #477a50;
 }
 
 .role-badge.admin { background: #fef3c7; color: #b45309; }
@@ -278,7 +278,7 @@ export default {
 .btn-approve {
   padding: 8px 16px;
   border-radius: 10px;
-  background: #2d8a7b;
+  background: #477a50;
   color: white;
   font-size: 14px;
   font-weight: 600;

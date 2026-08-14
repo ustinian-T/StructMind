@@ -1,0 +1,51 @@
+{
+  "bsonType": "object",
+  "required": ["user_id", "question_ids", "total", "completed", "correct", "wrong", "mode", "status", "created_at", "updated_at"],
+  "permission": {
+    "read": "doc.user_id === auth.uid || auth.role.includes('admin')",
+    "create": "auth.uid != null",
+    "update": "doc.user_id === auth.uid || auth.role.includes('admin')",
+    "delete": "auth.role.includes('admin')"
+  },
+  "properties": {
+    "_id": { "description": "练习会话ID" },
+    "user_id": {
+      "bsonType": "string",
+      "title": "用户ID",
+      "foreignKey": "structmind_users._id"
+    },
+    "question_ids": {
+      "bsonType": "array",
+      "title": "题目ID列表",
+      "items": { "bsonType": "string" }
+    },
+    "total": { "bsonType": "int", "title": "题目总数" },
+    "completed": { "bsonType": "int", "title": "已完成题数" },
+    "correct": { "bsonType": "int", "title": "正确题数" },
+    "wrong": { "bsonType": "int", "title": "错误题数" },
+    "mode": {
+      "bsonType": "string",
+      "title": "练习模式",
+      "enum": ["sequence", "random"]
+    },
+    "filters": {
+      "bsonType": "object",
+      "title": "练习筛选条件",
+      "description": "创建会话时的 types/chapters/difficulty 筛选"
+    },
+    "status": {
+      "bsonType": "string",
+      "title": "会话状态",
+      "enum": ["in_progress", "completed"]
+    },
+    "accuracy": {
+      "bsonType": "int",
+      "title": "正确率(%)",
+      "description": "会话完成时计算，0-100",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "created_at": { "bsonType": "timestamp" },
+    "updated_at": { "bsonType": "timestamp" }
+  }
+}

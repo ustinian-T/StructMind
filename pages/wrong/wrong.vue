@@ -1,12 +1,12 @@
 <template>
   <view class="wrong-page">
     <view class="page-header">
-      <text class="page-title">📖 错题本</text>
+      <text class="page-title">错题本</text>
       <text class="page-desc">回顾答错的题目，针对性提升</text>
     </view>
 
     <view class="empty" v-if="wrongItems.length === 0">
-      <text class="empty-icon">🎉</text>
+      <text class="empty-icon">0</text>
       <text class="empty-text">还没有错题记录</text>
       <text class="empty-desc">继续练习，答错的题目会自动收集到这里</text>
     </view>
@@ -74,7 +74,7 @@ export default {
 <style scoped>
 .wrong-page {
   min-height: 100vh;
-  background: #f5f8f7;
+  background: #f3f7f0;
   padding-bottom: 40px;
 }
 
@@ -107,7 +107,7 @@ export default {
 }
 
 .w-meta { display: flex; gap: 6px; }
-.w-tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #e8f5f2; color: #2d8a7b; }
+.w-tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #edf5e9; color: #477a50; }
 .w-tag.type { background: #e8f0f5; color: #3b6f9e; }
 .w-tag.bad { background: #fde8e8; color: #dc2626; }
 .w-stem { font-size: 14px; color: #1a2b28; line-height: 1.5; }

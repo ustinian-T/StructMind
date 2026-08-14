@@ -3,7 +3,7 @@
 
 const NAMES = {
   events: 'structmind_learning_events', mastery: 'structmind_concept_mastery',
-  changes: 'structmind_mastery_changes', recommendations: 'structmind_recommendation_snapshots',
+  changes: 'structmind_mastery_changes', recommendations: 'structmind_reco_snapshots',
 };
 
 function notFound(message = '学习事件不存在') {

@@ -1,0 +1,30 @@
+{
+  "bsonType": "object",
+  "required": ["type", "created_at"],
+  "permission": {
+    "read": "doc.user_id === auth.uid || auth.role.includes('admin')",
+    "create": "auth.uid != null",
+    "update": false,
+    "delete": "auth.role.includes('admin')"
+  },
+  "properties": {
+    "_id": { "description": "推送日志ID" },
+    "type": {
+      "bsonType": "string",
+      "title": "推送类型",
+      "enum": ["daily_reminder", "new_question", "approval", "custom", "broadcast"]
+    },
+    "user_id": {
+      "bsonType": "string",
+      "title": "用户ID",
+      "description": "广播类推送为 null",
+      "foreignKey": "structmind_users._id"
+    },
+    "title": { "bsonType": "string", "title": "推送标题" },
+    "content": { "bsonType": "string", "title": "推送内容" },
+    "sent": { "bsonType": "int", "title": "成功发送数" },
+    "skipped": { "bsonType": "int", "title": "跳过数" },
+    "reason": { "bsonType": "string", "title": "跳过原因" },
+    "created_at": { "bsonType": "timestamp" }
+  }
+}
