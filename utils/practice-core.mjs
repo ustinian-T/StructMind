@@ -6,6 +6,10 @@ const TYPE_LABELS = {
   short_answer: '简答题',
 }
 
+const TYPE_VALUES = Object.fromEntries(
+  Object.entries(TYPE_LABELS).map(([value, label]) => [label, value]),
+)
+
 export function normalizePracticeQuestion(raw = {}, source = 'local', fallbackId = '') {
   const sourceId = raw.source_id || raw.question_id || raw.id || raw._id || fallbackId
   const type = raw.type || ''
@@ -88,4 +92,16 @@ export function pickRandomQuestions(items, count, randomFn = Math.random) {
     ;[pool[index], pool[swapIndex]] = [pool[swapIndex], pool[index]]
   }
   return pool.slice(0, Math.max(0, Math.min(Number(count) || 0, pool.length)))
+}
+
+export function selectPracticeQuestions(source, localQuestions, aiQuestions) {
+  return source === 'ai' ? aiQuestions : localQuestions
+}
+
+export function getPracticeErrorCode(error) {
+  return error && typeof error === 'object' && 'code' in error ? String(error.code || '') : ''
+}
+
+export function toQuestionTypeValue(label) {
+  return TYPE_VALUES[label] || ''
 }
