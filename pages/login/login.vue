@@ -49,7 +49,13 @@
 
     <view class="login-bottom">
       <text class="bottom-text">© 2026 StructMind · 谭书宏</text>
-      <text class="bottom-text icp" @tap="openICP">湘ICP备2026021754号-2</text>
+      <view class="beian-row">
+        <text class="bottom-text icp" @tap="openICP">湘ICP备2026021754号-2</text>
+        <view class="beian-item" @tap="openMPS">
+          <image src="/static/beian-icon.png" class="beian-icon" mode="aspectFit"/>
+          <text class="bottom-text mps">湘公网安备43020002000425号</text>
+        </view>
+      </view>
     </view>
   </view>
 </template>
@@ -102,6 +108,11 @@ export default {
     openICP() {
       // #ifdef H5
       window.open('https://beian.miit.gov.cn', '_blank')
+      // #endif
+    },
+    openMPS() {
+      // #ifdef H5
+      window.open('https://beian.mps.gov.cn/#/query/webSearch?code=43020002000425', '_blank')
       // #endif
     },
   },
@@ -271,5 +282,29 @@ export default {
 .bottom-text.icp {
   margin-top: 4px;
   color: #8a9b96;
+}
+
+.beian-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.beian-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.beian-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.bottom-text.mps {
+  color: #8a9b96;
+  font-size: 12px;
 }
 </style>

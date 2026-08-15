@@ -162,7 +162,7 @@ function renderShell() {
         </div>
       </header>
       <div class="content-area">${renderTab()}</div>
-      <footer class="footer"><span>${APP.name} · 数据结构学习工作台</span><a href="https://beian.miit.gov.cn" target="_blank" rel="noopener">湘ICP备2026021754号-2</a></footer>
+      <footer class="footer"><span>${APP.name} · 数据结构学习工作台</span><span class="footer-beian"><a href="https://beian.miit.gov.cn" target="_blank" rel="noopener">湘ICP备2026021754号-2</a><a href="https://beian.mps.gov.cn/#/query/webSearch?code=43020002000425" target="_blank" rel="noopener" class="mps-beian"><img src="/beian-icon.png" alt="" width="14" height="14" loading="lazy"/>湘公网安备43020002000425号</a></span></footer>
     </main>
     <nav class="bottom-nav" aria-label="移动端导航">
       ${navItems().filter(([k])=>['dashboard','practice','ai','wrong'].includes(k)).map(([k,l,icon])=>`

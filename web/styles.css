@@ -137,6 +137,9 @@ svg { display: block; }
 .footer { width: min(100%, 72rem); margin: 2.5rem auto 0; padding: 1rem 0 .25rem; border-top: 1px solid var(--border-light); display: flex; justify-content: space-between; gap: 1rem; color: var(--muted); font-size: .72rem; }
 .footer a { color: inherit; }
 .footer a:hover { color: var(--primary); }
+.footer-beian { display: inline-flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+.footer-beian .mps-beian { display: inline-flex; align-items: center; gap: .25rem; }
+.footer-beian .mps-beian img { width: 14px; height: 14px; vertical-align: middle; }
 .bottom-nav { display: none; }
 
 /* ── Learning evidence ── */
