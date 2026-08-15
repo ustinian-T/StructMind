@@ -1,11 +1,10 @@
 """把导出的题库 POST 到 uniCloud structmind-import 云函数。
 
-需要在 uniCloud 控制台拿到云函数 URL（通常是
-https://fc-mp-xxxx.bspapp.com/structmind-import），以及一个
-管理员 token。
+默认域名为 fc-mp-d74eb953-b479-43d3-9fda-e3524a6ad7e1.next.bspapp.com，
+可以通过 SM_UNICLOUD_IMPORT_URL 覆盖。
 
 环境变量：
-    SM_UNICLOUD_IMPORT_URL   —— 云函数完整 URL
+    SM_UNICLOUD_IMPORT_URL   —— 云函数完整 URL，默认按上方域名拼接
     SM_ADMIN_TOKEN            —— structmind-import 的 requireAdmin 校验 token
 """
 from __future__ import annotations
@@ -18,6 +17,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPORT_DIR = ROOT / "runtime" / "exports"
+
+DEFAULT_UNICLOUD_DOMAIN = "fc-mp-d74eb953-b479-43d3-9fda-e3524a6ad7e1.next.bspapp.com"
+DEFAULT_FUNCTION_NAME = "structmind-import"
 
 
 def post_manifest(url: str, token: str, payload: dict) -> dict:
@@ -40,11 +42,12 @@ def post_manifest(url: str, token: str, payload: dict) -> dict:
 
 def main() -> None:
     url = os.environ.get("SM_UNICLOUD_IMPORT_URL", "").strip()
+    if not url:
+        url = f"https://{DEFAULT_UNICLOUD_DOMAIN}/{DEFAULT_FUNCTION_NAME}"
+        print(f"[info] SM_UNICLOUD_IMPORT_URL 未设置，使用默认：{url}")
     token = os.environ.get("SM_ADMIN_TOKEN", "").strip()
-    if not url or not token:
-        print("缺少环境变量:")
-        print("  SM_UNICLOUD_IMPORT_URL  (云函数 URL)")
-        print("  SM_ADMIN_TOKEN            (管理员 token)")
+    if not token:
+        print("缺少环境变量 SM_ADMIN_TOKEN（管理员 token），无法调用。")
         print()
         print("或者直接打开 HBuilderX → structmind-import → importAll,")
         print("把 runtime/exports/manifest.json 粘贴进去即可。")
