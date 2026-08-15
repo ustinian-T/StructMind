@@ -8,17 +8,31 @@
     "delete": "auth.role.includes('admin')"
   },
   "properties": {
-    "_id": { "description": "记录ID" },
+    "_id": {
+      "description": "记录ID（系统自动生成）"
+    },
     "token": {
       "bsonType": "string",
-      "title": "会话令牌"
+      "title": "会话令牌",
+      "description": "登录后下发的随机令牌，前端通过 Authorization: Bearer <token> 携带",
+      "minLength": 16,
+      "maxLength": 128
     },
     "user_id": {
       "bsonType": "string",
-      "title": "用户ID",
+      "title": "所属用户",
+      "description": "关联 structmind_users._id，登录时由 structmind-auth/login 写入",
       "foreignKey": "structmind_users._id"
     },
-    "created_at": { "bsonType": "timestamp" },
-    "expires_at": { "bsonType": "timestamp" }
+    "created_at": {
+      "bsonType": "timestamp",
+      "title": "创建时间",
+      "description": "登录成功的时间戳（毫秒）"
+    },
+    "expires_at": {
+      "bsonType": "timestamp",
+      "title": "过期时间",
+      "description": "会话到期时间戳；过期后所有云函数 requireAuth 会拒绝"
+    }
   }
 }
