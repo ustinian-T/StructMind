@@ -1,7 +1,13 @@
 <template>
   <view class="practice-page">
     <view class="page-header">
-      <text class="page-title">题库练习</text>
+      <view class="page-title-row">
+        <text class="page-title">题库练习</text>
+        <view v-if="fromCache" class="cache-badge" @tap="refreshOnline">
+          <text class="cache-badge-dot"></text>
+          <text>本地缓存 · {{ cacheAgeLabel }}</text>
+        </view>
+      </view>
       <text class="page-desc">数据结构期末 · 323道客观题</text>
     </view>
 
@@ -131,6 +137,16 @@
             <SmButton variant="primary" block @click="startNextRecommendation">开始推荐题</SmButton>
           </view>
         </view>
+
+        <!-- AI 详细解析：答完题后可调用 structmind-ai/questionAI -->
+        <view class="ai-explain-row">
+          <button class="ai-explain-btn" :disabled="aiExplainLoading" @tap="askAIExplain">
+            <text>{{ aiExplainLoading ? 'AI 解析中…' : 'AI 详细解析' }}</text>
+          </button>
+        </view>
+        <view v-if="aiExplainReply" class="ai-explain-reply">
+          <text class="ai-explain-content">{{ aiExplainReply }}</text>
+        </view>
       </view>
 
       <!-- Navigation (bottom of answer panel) -->
@@ -187,7 +203,16 @@
           <text class="empty-kicker">连接未完成</text>
           <text class="empty-title">题库暂时没有加载成功</text>
           <text class="empty-text">{{ loadError }}</text>
-          <view class="empty-retry" @tap="loadQuestions()"><text>重新加载</text></view>
+          <view class="empty-actions">
+            <view class="empty-retry" @tap="loadQuestions()"><text>重新加载</text></view>
+            <view class="empty-retry secondary" @tap="openAIGenerate">
+              <text>试试 AI 出题</text>
+            </view>
+          </view>
+          <text class="empty-tip">
+            没有题目时，可以先用"AI 出题"生成 1~5 道题练手；正式题目需要在管理后台导入
+            （运行 scripts/export_question_bank.py → scripts/post_to_unicloud.py 一键灌库）。
+          </text>
         </view>
         <view class="empty" v-else-if="filteredQuestions.length === 0">
           <text class="empty-kicker">当前筛选</text>
@@ -248,6 +273,64 @@
     <view class="bottom-actions" v-if="!answerMode && !loadingQuestions && !loadError">
       <SmButton variant="primary" block icon="" @click="startRandom10">随机10题</SmButton>
       <SmButton variant="gradient" block @click="startRecommend">智能推荐</SmButton>
+      <SmButton variant="soft" block @click="openAIGenerate">AI 出题</SmButton>
+    </view>
+
+    <!-- AI 出题弹窗 -->
+    <view v-if="showAIGenerateModal" class="ai-gen-modal-mask" @tap.self="closeAIGenerate">
+      <view class="ai-gen-modal">
+        <view class="ai-gen-head">
+          <text class="ai-gen-title">AI 智能出题</text>
+          <text class="ai-gen-close" @tap="closeAIGenerate">×</text>
+        </view>
+        <view class="ai-gen-body">
+          <text class="ai-gen-label">章节</text>
+          <input class="ai-gen-input" v-model="aiGenParams.chapter" placeholder="例如：栈和队列" />
+          <text class="ai-gen-label">题型</text>
+          <view class="ai-gen-chips">
+            <view
+              v-for="t in aiGenTypes"
+              :key="t.value"
+              class="ai-gen-chip"
+              :class="{ active: aiGenParams.type === t.value }"
+              @tap="aiGenParams.type = t.value"
+            >
+              <text>{{ t.label }}</text>
+            </view>
+          </view>
+          <text class="ai-gen-label">难度（1-5）</text>
+          <view class="ai-gen-chips">
+            <view
+              v-for="d in [1,2,3,4,5]"
+              :key="d"
+              class="ai-gen-chip"
+              :class="{ active: aiGenParams.difficulty === d }"
+              @tap="aiGenParams.difficulty = d"
+            >
+              <text>{{ d }}</text>
+            </view>
+          </view>
+          <text class="ai-gen-label">生成数量</text>
+          <view class="ai-gen-chips">
+            <view
+              v-for="n in [1,3,5]"
+              :key="n"
+              class="ai-gen-chip"
+              :class="{ active: aiGenParams.count === n }"
+              @tap="aiGenParams.count = n"
+            >
+              <text>{{ n }} 道</text>
+            </view>
+          </view>
+          <text v-if="aiGenError" class="ai-gen-error">{{ aiGenError }}</text>
+        </view>
+        <view class="ai-gen-actions">
+          <button class="ai-gen-btn ghost" @tap="closeAIGenerate">取消</button>
+          <button class="ai-gen-btn primary" :disabled="aiGenSubmitting" @tap="submitAIGenerate">
+            <text>{{ aiGenSubmitting ? '生成中…' : '生成题目' }}</text>
+          </button>
+        </view>
+      </view>
     </view>
 
     <!-- Toast -->
@@ -268,6 +351,9 @@ export default {
       sessionId: null,
       loadingQuestions: true,
       loadError: '',
+      // 离线缓存：显示已缓存的题目时为 true
+      fromCache: false,
+      cacheAgeLabel: '',
       types: ['单选题', '多选题', '填空题', '判断题'],
       activeType: '',
       activeChapter: '',
@@ -292,6 +378,25 @@ export default {
       toastVisible: false,
       toastMsg: '',
       toastType: 'info',
+      // AI 出题弹窗
+      showAIGenerateModal: false,
+      aiGenSubmitting: false,
+      aiGenError: '',
+      aiGenTypes: [
+        { label: '单选题', value: 'single_choice' },
+        { label: '多选题', value: 'multi_choice' },
+        { label: '判断题', value: 'true_false' },
+        { label: '填空题', value: 'fill_blank' },
+      ],
+      aiGenParams: {
+        chapter: '',
+        type: 'single_choice',
+        difficulty: 3,
+        count: 1,
+      },
+      // AI 详细解析（每题答完后）
+      aiExplainLoading: false,
+      aiExplainReply: '',
     }
   },
   computed: {
@@ -336,9 +441,62 @@ export default {
     },
   },
   async mounted() {
+    // 1) 先尝试从本地缓存秒开（离线 / 弱网下也能浏览）
+    this.hydrateFromCache()
+    // 2) 再去云端拉新数据；失败则保留缓存 + 显示小提示
     await this.loadQuestions()
   },
   methods: {
+    _cacheKey() {
+      const app = getApp()
+      const token = app.globalData?.token || 'anon'
+      return `sm_practice_${token.slice(0, 8)}_${this.activeType || 'all'}_${this.activeChapter || 'all'}`
+    },
+    _serializeQuestions() {
+      // uni.setStorageSync 的 key 上限 ~1MB，需要剥掉大字段
+      return this.questions.map(q => ({
+        ...q,
+        // 移除前端不需要的大字段，缩减存储
+        images: Array.isArray(q.images) ? q.images.slice(0, 3) : [],
+        recommendation_explanation: '',
+        answer: '',
+        raw_correct: '',
+      }))
+    },
+    hydrateFromCache() {
+      try {
+        const raw = uni.getStorageSync(this._cacheKey())
+        if (!raw) return
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+        if (!parsed || !parsed.questions || !Array.isArray(parsed.questions)) return
+        // 缓存有效期 12 小时
+        if (Date.now() - (parsed.cached_at || 0) > 12 * 60 * 60 * 1000) return
+
+        this.questions = parsed.questions.map(normalizeCloudQuestion)
+        const chSet = new Set(this.questions.map(q => q.chapter).filter(Boolean))
+        this.chapters = [...chSet].sort()
+        this.sessionId = parsed.session_id || null
+        this.fromCache = true
+        const ageMs = Date.now() - (parsed.cached_at || 0)
+        this.cacheAgeLabel = ageMs < 60_000 ? '刚刚' :
+          ageMs < 3600_000 ? `${Math.round(ageMs / 60_000)} 分钟前` :
+          `${Math.round(ageMs / 3600_000)} 小时前`
+        this.loadingQuestions = false
+      } catch (_e) { /* 静默吞：缓存损坏不应阻塞 UI */ }
+    },
+    persistCache() {
+      try {
+        uni.setStorageSync(this._cacheKey(), {
+          questions: this._serializeQuestions(),
+          session_id: this.sessionId,
+          cached_at: Date.now(),
+        })
+      } catch (_e) { /* 配额满或序列化失败，吞掉即可 */ }
+    },
+    refreshOnline() {
+      this.fromCache = false
+      return this.loadQuestions()
+    },
     async loadQuestions(mode = 'sequence', limit = 200, includeWrong = false) {
       this.loadingQuestions = true
       this.loadError = ''
@@ -359,17 +517,23 @@ export default {
         this.questions = (data.questions || []).map(normalizeCloudQuestion)
         const chSet = new Set(this.questions.map(q => q.chapter).filter(Boolean))
         this.chapters = [...chSet].sort()
+        // 写入本地缓存（云端拉取成功后覆盖旧缓存）
+        this.persistCache()
+        this.fromCache = false
       } catch (err) {
-        this.questions = []
-        // 把后端真实错误透出来，方便排查"未导入题库" / 鉴权失效 等场景。
+        // 云端失败：若已有缓存则保留缓存 + 提示
         const msg = (err && (err.message || err.errMsg)) || ''
         const code = err && err.code
-        if (code === 401) this.loadError = '登录已失效，请重新登录后重试。'
-        else if (code === 403) this.loadError = '账号未通过审批，无法加载题库。'
-        else if (code === 404) this.loadError = `题库为空：${msg}。请在管理后台导入题目数据。`
-        else this.loadError = msg
-          ? `${msg}（请检查网络或确认题库云函数已部署）`
-          : '请检查网络或重新登录后再试。若持续失败，请确认题库云函数已部署。'
+        if (this.questions.length > 0) {
+          this.loadError = `云端同步失败：${msg || '请检查网络'}（当前显示的是缓存）`
+        } else {
+          if (code === 401) this.loadError = '登录已失效，请重新登录后重试。'
+          else if (code === 403) this.loadError = '账号未通过审批，无法加载题库。'
+          else if (code === 404) this.loadError = `题库为空：${msg}。请在管理后台导入题目数据。`
+          else this.loadError = msg
+            ? `${msg}（请检查网络或确认题库云函数已部署）`
+            : '请检查网络或重新登录后再试。若持续失败，请确认题库云函数已部署。'
+        }
       } finally {
         this.loadingQuestions = false
       }
@@ -548,6 +712,109 @@ export default {
       return labels[reason.code || reason.category] || reason.label || '规则自动分类'
     },
 
+    // ── AI 详细解析（每题答完后） ──
+    async askAIExplain() {
+      if (this.aiExplainLoading) return
+      const q = this.currentQ
+      if (!q || !q.id) {
+        this.showToast('题目数据缺失', 'error')
+        return
+      }
+      this.aiExplainLoading = true
+      this.aiExplainReply = ''
+      try {
+        const app = getApp()
+        const data = await callCloud('structmind-ai', 'questionAI', {
+          token: app.globalData?.token,
+          question_id: q.id,
+          bank_id: q.bank_id || 'exam',
+          mode: 'explain',
+          model: '',
+        })
+        this.aiExplainReply = (data && data.reply) || 'AI 暂未返回内容'
+      } catch (err) {
+        const code = err && err.code
+        if (code === 'AI_CONFIG_REQUIRED' || code === 'AI_CREDENTIAL_INVALID') {
+          this.showToast('请先在"我的 AI 模型"配置可用 API Key', 'error')
+        } else if (code === 404) {
+          this.showToast('AI 题库未找到该题目（可能尚未导入）', 'error')
+        } else {
+          this.showToast((err && (err.message || err.errMsg)) || 'AI 解析失败', 'error')
+        }
+      } finally {
+        this.aiExplainLoading = false
+      }
+    },
+
+    // ── AI 出题 ──
+    openAIGenerate() {
+      this.aiGenError = ''
+      this.aiGenParams.chapter = this.activeChapter || ''
+      // 根据当前筛选的题型智能预选
+      const map = { '单选题': 'single_choice', '多选题': 'multi_choice', '判断题': 'true_false', '填空题': 'fill_blank' }
+      if (this.activeType && map[this.activeType]) {
+        this.aiGenParams.type = map[this.activeType]
+      }
+      this.showAIGenerateModal = true
+    },
+    closeAIGenerate() {
+      if (this.aiGenSubmitting) return
+      this.showAIGenerateModal = false
+      this.aiGenError = ''
+    },
+    async submitAIGenerate() {
+      const params = this.aiGenParams
+      if (!params.chapter || !params.chapter.trim()) {
+        this.aiGenError = '请填写章节，例如"栈和队列"'
+        return
+      }
+      this.aiGenSubmitting = true
+      this.aiGenError = ''
+      try {
+        const app = getApp()
+        const data = await callCloud('structmind-ai', 'generateQuestion', {
+          token: app.globalData?.token,
+          chapter: params.chapter.trim(),
+          type: params.type,
+          difficulty: params.difficulty,
+          count: params.count,
+          auto_import: true,   // 自动入库，下一轮就能直接练
+        })
+        const items = Array.isArray(data.questions) ? data.questions : []
+        if (!items.length) throw new Error(data.message || '生成结果为空')
+        // 把 AI 题注入当前 session（不重置 sessionId，便于继续练）
+        const qItems = items.map(it => normalizeCloudQuestion({
+          id: it.question_id || it._id,
+          _id: it._id,
+          type: it.type || params.type,
+          qtype: ({ single_choice: '单选题', multi_choice: '多选题', true_false: '判断题', fill_blank: '填空题' })[it.type] || params.type,
+          chapter: it.chapter || params.chapter,
+          content: it.content || it.stem,
+          stem: it.content || it.stem,
+          options: it.options || [],
+          answer: it.answer || '',
+          analysis: it.analysis || '',
+        }))
+        this.questions = [...this.questions, ...qItems]
+        const chSet = new Set(this.questions.map(q => q.chapter).filter(Boolean))
+        this.chapters = [...chSet].sort()
+        this.persistCache()
+        this.showAIGenerateModal = false
+        this.showToast(`已生成 ${items.length} 道题，可直接练习`, 'success')
+      } catch (err) {
+        const code = err && err.code
+        if (code === 'AI_CONFIG_REQUIRED' || code === 'AI_CREDENTIAL_INVALID') {
+          this.aiGenError = '请先到"我的 AI 模型"配置可用 API Key。'
+        } else if (code === 'AI_QUOTA_EXCEEDED') {
+          this.aiGenError = 'AI 额度不足，请稍后再试。'
+        } else {
+          this.aiGenError = (err && (err.message || err.errMsg)) || '生成失败，请检查 AI 配置或网络'
+        }
+      } finally {
+        this.aiGenSubmitting = false
+      }
+    },
+
     // ── Swipe handlers ──
     onTouchStart(e) {
       this.touchStartX = e.touches[0].clientX
@@ -659,6 +926,17 @@ export default {
 .empty-kicker { display: block; color: #477a50; font-size: 12px; font-weight: 700; letter-spacing: 1px; }
 .empty-title { display: block; margin-top: 8px; color: #1a2b28; font-size: 20px; font-weight: 700; }
 .empty-text { display: block; margin-top: 8px; font-size: 14px; line-height: 1.7; color: #6b8280; }
+.empty-actions {
+  display: flex; gap: 10px; margin-top: 4px; flex-wrap: wrap;
+}
+.empty-retry.secondary {
+  background: transparent; color: #2f5f3d;
+  border: 1px solid #d8e4d3;
+}
+.empty-tip {
+  display: block; margin-top: 14px; font-size: 12px; line-height: 1.6;
+  color: #94a097; max-width: 320px;
+}
 .empty-retry {
   display: inline-flex; margin-top: 18px; padding: 10px 22px; border-radius: 12px;
   background: #477a50; color: #fff; font-size: 14px; font-weight: 700;
@@ -788,4 +1066,120 @@ export default {
 .proof-line { font-size: 12px; line-height: 1.6; color: #4a5c58; }
 .mastery-row { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: #477a50; }
 .recommend-proof { padding: 12px; border-radius: 12px; background: #edf5e9; display: flex; flex-direction: column; gap: 8px; }
+
+/* 缓存状态徽章（点击触发云端同步） */
+.page-title-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.cache-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border-radius: 999px;
+  background: rgba(71, 122, 80, 0.08);
+  border: 1px solid rgba(71, 122, 80, 0.18);
+  color: #2f5f3d; font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.cache-badge:active { background: rgba(71, 122, 80, 0.18); }
+.cache-badge-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #477a50;
+  animation: cache-pulse 1.6s ease-in-out infinite;
+}
+@keyframes cache-pulse {
+  0%, 100% { opacity: 0.45; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+
+/* AI 出题弹窗 */
+.ai-gen-modal-mask {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(15, 32, 25, 0.45);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.ai-gen-modal {
+  width: 100%; max-width: 420px; background: #fffefb;
+  border-radius: 18px; padding: 22px;
+  box-shadow: 0 24px 60px rgba(15, 32, 25, 0.22);
+  display: flex; flex-direction: column; gap: 14px;
+}
+.ai-gen-head {
+  display: flex; align-items: center; justify-content: space-between;
+}
+.ai-gen-title { font-size: 17px; font-weight: 700; color: #183229; }
+.ai-gen-close {
+  width: 28px; height: 28px; line-height: 26px; text-align: center;
+  font-size: 22px; color: #94a097; border-radius: 50%;
+  background: transparent; border: 0;
+}
+.ai-gen-close:active { background: rgba(0,0,0,0.05); }
+.ai-gen-body { display: flex; flex-direction: column; gap: 12px; }
+.ai-gen-label {
+  font-size: 13px; color: #4a5c58; font-weight: 600;
+}
+.ai-gen-input {
+  height: 40px; padding: 0 12px;
+  border: 1px solid #d8e4d3; border-radius: 10px;
+  background: #fff; font-size: 14px; color: #183229;
+}
+.ai-gen-input:focus { border-color: #477a50; outline: none; }
+.ai-gen-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.ai-gen-chip {
+  padding: 6px 14px; border-radius: 999px;
+  border: 1px solid #d8e4d3; background: #fffefb;
+  font-size: 13px; color: #4a5c58;
+  transition: all 0.15s ease;
+}
+.ai-gen-chip.active {
+  background: #477a50; color: #fff; border-color: #477a50;
+}
+.ai-gen-error {
+  font-size: 12px; color: #b84b42; padding: 8px 12px;
+  background: #fff0ee; border-radius: 8px;
+}
+.ai-gen-actions {
+  display: flex; gap: 8px; justify-content: flex-end;
+  border-top: 1px solid #eef3ec; padding-top: 14px;
+}
+.ai-gen-btn {
+  min-width: 92px; min-height: 38px; padding: 0 16px;
+  border-radius: 10px; font-size: 13px; font-weight: 600;
+  border: 1px solid #d8e4d3; background: #fffefb; color: #4a5c58;
+}
+.ai-gen-btn.primary {
+  background: #477a50; color: #fff; border-color: #477a50;
+}
+.ai-gen-btn[disabled] { opacity: 0.5; }
+.ai-gen-btn:active:not([disabled]) { transform: scale(0.97); }
+
+/* 底部按钮：原本只有 2 个，现在加 AI 出题 → 3 列网格 */
+.bottom-actions {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (max-width: 480px) {
+  .bottom-actions { grid-template-columns: 1fr; }
+}
+
+/* AI 详细解析（答完题后展示） */
+.ai-explain-row { margin-top: 14px; }
+.ai-explain-btn {
+  width: 100%; min-height: 40px;
+  border-radius: 10px;
+  background: #f4f8f3; color: #2f5f3d;
+  border: 1px solid #d8e4d3; font-size: 13px; font-weight: 600;
+  transition: all 0.15s ease;
+}
+.ai-explain-btn:active:not([disabled]) { transform: scale(0.97); background: #eaf5e7; }
+.ai-explain-btn[disabled] { opacity: 0.55; }
+.ai-explain-reply {
+  margin-top: 12px; padding: 14px;
+  border-radius: 10px;
+  background: #f5f8f3;
+  border-left: 3px solid #477a50;
+}
+.ai-explain-content {
+  font-size: 14px; line-height: 1.7; color: #244333;
+  white-space: pre-wrap;
+}
 </style>
