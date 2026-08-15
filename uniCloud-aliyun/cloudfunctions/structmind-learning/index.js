@@ -8,8 +8,8 @@ try {
   rules = require('structmind-learning-rules');
   storeFactory = require('structmind-learning-store');
 } catch (_error) {
-  rules = require('../common/structmind-learning-rules');
-  storeFactory = require('../common/structmind-learning-store');
+  rules = require('./structmind-learning-rules');
+  storeFactory = require('./structmind-learning-store');
 }
 const store = storeFactory.createLearningStore(db);
 const sessions = db.collection('structmind_sessions');

@@ -1,4 +1,6 @@
 <template>
+  <!-- 用 scroll-view 包裹确保 H5 端一定能上下滚动，绕过 uni-app x 在某些 H5 外壳下不响应 body overflow 的问题。 -->
+  <scroll-view scroll-y class="settings-scroll">
   <view class="settings-page">
     <view class="ambient ambient-one"></view>
     <view class="ambient ambient-two"></view>
@@ -80,6 +82,7 @@
       </view>
     </view>
   </view>
+  </scroll-view>
 </template>
 
 <script>
@@ -200,6 +203,12 @@ export default {
 </script>
 
 <style scoped>
+/* 滚动容器：template 根用 scroll-view，确保 H5 / 各端都能滚 */
+.settings-scroll {
+  width: 100%;
+  height: 100vh;
+  background: #f5f8f3;
+}
 /* 滚动：之前 overflow:hidden 把内容切掉无法下滑；改为 min-height + 自然滚动 */
 .settings-page {
   min-height: 100vh;

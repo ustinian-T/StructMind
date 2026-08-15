@@ -26,7 +26,7 @@ const { callModel } = require('./lib/model-gateway');
 const { createAgentEnvelope } = require('./lib/credential-crypto');
 let learningRules;
 try { learningRules = require('structmind-learning-rules'); }
-catch (_error) { learningRules = require('../common/structmind-learning-rules'); }
+catch (_error) { learningRules = require('./structmind-learning-rules'); }
 const SESSION_MAX_AGE_MS = Number(process.env.SM_SESSION_MAX_AGE_MS) || 7 * 24 * 60 * 60 * 1000;
 
 // Tutor Agent 只允许通过 FastAPI 核心执行；该凭据与终端用户 token 分离。

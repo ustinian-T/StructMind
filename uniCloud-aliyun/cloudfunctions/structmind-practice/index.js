@@ -22,8 +22,8 @@ try {
   learningRules = require('structmind-learning-rules');
   learningStoreFactory = require('structmind-learning-store');
 } catch (_error) {
-  learningRules = require('../common/structmind-learning-rules');
-  learningStoreFactory = require('../common/structmind-learning-store');
+  learningRules = require('./structmind-learning-rules');
+  learningStoreFactory = require('./structmind-learning-store');
 }
 const learningStore = learningStoreFactory.createLearningStore(db);
 
