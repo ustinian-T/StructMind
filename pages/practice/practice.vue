@@ -56,7 +56,6 @@
         <view class="q-meta">
           <text class="q-tag">{{ currentQ.chapter }}</text>
           <text class="q-tag type">{{ currentQ.qtype }}</text>
-          <text class="q-tag difficulty" v-if="currentQ.difficulty">{{ currentQ.difficulty }}</text>
           <text class="q-tag source">#{{ currentQ.source_order || currentQ.id }}</text>
         </view>
         <text class="answer-stem">{{ currentQ.stem }}</text>
@@ -362,7 +361,15 @@ export default {
         this.chapters = [...chSet].sort()
       } catch (err) {
         this.questions = []
-        this.loadError = '请检查网络或重新登录后再试。若持续失败，请确认题库云函数已部署。'
+        // 把后端真实错误透出来，方便排查"未导入题库" / 鉴权失效 等场景。
+        const msg = (err && (err.message || err.errMsg)) || ''
+        const code = err && err.code
+        if (code === 401) this.loadError = '登录已失效，请重新登录后重试。'
+        else if (code === 403) this.loadError = '账号未通过审批，无法加载题库。'
+        else if (code === 404) this.loadError = `题库为空：${msg}。请在管理后台导入题目数据。`
+        else this.loadError = msg
+          ? `${msg}（请检查网络或确认题库云函数已部署）`
+          : '请检查网络或重新登录后再试。若持续失败，请确认题库云函数已部署。'
       } finally {
         this.loadingQuestions = false
       }

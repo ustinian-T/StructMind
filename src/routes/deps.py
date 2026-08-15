@@ -80,7 +80,15 @@ async def require_admin(
 
 
 def consume_ai_quota(app, user_id: int) -> None:
-    """Consume one AI request from a per-process, per-user sliding window."""
+    """Consume one AI request from a per-process, per-user sliding window.
+
+    注意：当前实现把速率限制状态存在进程内 dict（app.state.ai_rate_limit_buckets），
+    意味着**仅在单 worker 部署时是准确的**。多 worker（uvicorn --workers N）
+    部署下，每个 worker 各自维护一份限速窗口，实际限速会被放大 N 倍。
+
+    如需多 worker 精确限速，应替换为 Redis / slowapi 等共享存储。
+    本注释同时作为部署文档的一部分，部署时请显式确认 worker 数。
+    """
     max_requests = max(
         1,
         int(getattr(app.state, "ai_rate_limit_max", AI_RATE_LIMIT_MAX_REQUESTS)),
@@ -175,7 +183,14 @@ def validate_phone(value: str) -> str:
 
 
 def make_error_response(exc: Exception) -> tuple[int, dict[str, Any]]:
-    """将异常映射为 HTTP 状态码 + 错误响应字典。"""
+    """将异常映射为 HTTP 状态码 + 错误响应字典。
+
+    已知类型按语义映射：403 / 404 / 400 / 502；
+    未知异常一律映射为 500，且不把原始异常字符串（可能含路径/SQL 片段）
+    透回给前端，原始异常只写入服务端日志。
+    """
+    import logging
+
     from src.ai.providers import AIProviderError
     from src.ai.credential_envelope import CredentialEnvelopeError
 
@@ -189,4 +204,6 @@ def make_error_response(exc: Exception) -> tuple[int, dict[str, Any]]:
         return 400, {"error": str(exc)}
     if isinstance(exc, PermissionError):
         return 403, {"error": str(exc)}
-    return 400, {"error": str(exc)}
+    # 未知异常：不暴露原始消息，避免泄漏路径/SQL/堆栈。
+    logging.getLogger("structmind").exception("Unhandled server error: %r", exc)
+    return 500, {"error": "服务器内部错误，请稍后重试。"}

@@ -68,12 +68,25 @@ async def create_session_view(req: SessionRequest, request: Request):
             if chapters:
                 questions = [q for q in questions if q.chapter in chapters]
 
-        count = len(questions)
-        if req.count not in (None, "", 0, "0", "all"):
-            count = max(1, min(int(req.count), len(questions)))
+        # count 语义：
+        # - None / "" / 0 / "0"      → 使用默认上限 10 题（前端可传 0 表示"使用默认"）
+        # - "all"                     → 全部题目
+        # - 其他（int 或数字字符串）   → 取该数量，但不超过题库总数
+        DEFAULT_LIMIT = 10
+        raw_count = req.count
+        use_all = raw_count == "all"
+        if raw_count in (None, "", 0, "0"):
+            count = min(DEFAULT_LIMIT, len(questions))
+        elif use_all:
+            count = len(questions)
+        else:
+            try:
+                count = max(1, min(int(raw_count), len(questions)))
+            except (TypeError, ValueError):
+                count = min(DEFAULT_LIMIT, len(questions))
 
         if mode == "random":
-            selected = random.sample(questions, count) if count else []
+            selected = random.sample(questions, count) if count and questions else []
         else:
             selected = questions[:count]
 

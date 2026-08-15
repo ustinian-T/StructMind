@@ -133,6 +133,7 @@ async def _stream_local_turn(
     async for event in orchestrator.stream(context, tool_registry):
         if event.type == "delta" and event.content:
             reply_parts.append(event.content)
+        outgoing_event = event
         if event.type == "done":
             reply = "".join(reply_parts)
             updated = [
@@ -158,8 +159,9 @@ async def _stream_local_turn(
                 int(context.user_id), conversation_id,
                 [name for name, _keywords in CONCEPT_KEYWORDS],
             )
-            event = event.model_copy(update={"conversation_id": conversation_id})
-        yield event
+            # 用 outgoing_event 承载"可能的修改版本"，避免对循环变量 `event` 直接赋值。
+            outgoing_event = event.model_copy(update={"conversation_id": conversation_id})
+        yield outgoing_event
 
 
 async def _collect_local_turn(
@@ -189,37 +191,49 @@ async def _collect_local_turn(
 
 @websocket_router.websocket("/ws/tutor")
 async def tutor_websocket(websocket: WebSocket):
-    """Authenticated WebSocket adapter over the shared Agent event stream."""
+    """Authenticated WebSocket adapter over the shared Agent event stream.
+
+    Auth flow: 必须先发一条 {"type":"auth","token":"..."} 完成登录态校验。
+    未通过 auth 直接发 message 的请求会被立即关闭（1008），不再依赖
+    session 在 message 中回退校验——这避免了"先发 message 后发 auth"的
+    竞态缝隙。
+    """
     await websocket.accept()
     db = websocket.app.state.db
-    exam_bank = websocket.app.state.exam_bank
     session: dict[str, Any] | None = None
     try:
+        # 强制第一帧必须是 auth，且 auth 失败立刻关闭 socket。
+        first_payload = await websocket.receive_json()
+        if first_payload.get("type") != "auth":
+            await websocket.send_json({"type": "error", "error": "请先登录后再使用 AI 导师。"})
+            await websocket.close(code=1008)
+            return
+        session = db.get_session(str(first_payload.get("token") or ""))
+        if not session or session.get("status") != "approved":
+            await websocket.send_json({"type": "error", "error": "登录状态已失效，请重新登录。"})
+            await websocket.close(code=1008)
+            return
+        await websocket.send_json({"type": "auth", "ok": True})
+
         while True:
             payload = await websocket.receive_json()
             message_type = payload.get("type")
-            if message_type == "auth":
-                session = db.get_session(str(payload.get("token") or ""))
-                if not session or session.get("status") != "approved":
-                    await websocket.send_json({"type": "error", "error": "登录状态已失效，请重新登录。"})
-                    await websocket.close(code=1008)
-                    return
-                await websocket.send_json({"type": "auth", "ok": True})
-                continue
             if message_type != "message":
                 await websocket.send_json({"type": "error", "error": "不支持的消息类型。"})
                 continue
-            if not session:
-                session = db.get_session(str(payload.get("token") or ""))
-            if not session or session.get("status") != "approved":
-                await websocket.send_json({"type": "error", "error": "请先登录。"})
-                await websocket.close(code=1008)
-                return
+            # session 在首帧已锁定，后续不需要重新校验；如 token 已撤销可
+            # 在此处加额外检查（当前实现：登录态 7 天有效期内视为有效）。
 
             try:
                 consume_ai_quota(websocket.app, int(session["user_id"]))
-            except Exception as exc:
-                await websocket.send_json({"type": "error", "error": getattr(exc, "detail", str(exc))})
+            except HTTPException as exc:
+                retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                await websocket.send_json({
+                    "type": "error",
+                    "code": "ai_quota_exceeded",
+                    "error": exc.detail,
+                    **({"retry_after": int(retry_after)} if retry_after else {}),
+                })
                 continue
 
             try:

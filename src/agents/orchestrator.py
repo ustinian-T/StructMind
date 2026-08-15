@@ -136,14 +136,18 @@ class TutorOrchestrator:
                 return
 
             assistant_calls = []
+            invalid_call_ids: set[str] = set()
             for call in tool_calls:
                 if "_invalid_json" in call.arguments:
                     yield factory.create(
                         "error",
                         code="invalid_tool_arguments",
+                        tool_call_id=call.id,
+                        tool_name=call.name,
                         message=f"工具 {call.name} 的参数不是合法 JSON。",
                     )
-                    return
+                    invalid_call_ids.add(call.id)
+                    continue
                 assistant_calls.append({
                     "id": call.id,
                     "type": "function",
@@ -152,6 +156,16 @@ class TutorOrchestrator:
                         "arguments": json.dumps(call.arguments, ensure_ascii=False),
                     },
                 })
+
+            # 安全网：如果本轮所有工具调用都是非法 JSON（没有可执行的有效工具），
+            # 直接终止对话，避免无限重发同一条坏调用。
+            if not assistant_calls:
+                yield factory.create(
+                    "error",
+                    code="invalid_tool_arguments",
+                    message="本轮所有工具调用的参数都不是合法 JSON，已终止。",
+                )
+                return
             messages.append({
                 "role": "assistant",
                 "content": turn_text or None,
@@ -159,6 +173,18 @@ class TutorOrchestrator:
             })
 
             for call in tool_calls:
+                if call.id in invalid_call_ids:
+                    # 跳过本轮 JSON 损坏的工具调用，但仍把它以错误形式追加到
+                    # messages，避免模型下一轮再次重新触发同一条调用。
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": call.id,
+                        "content": json.dumps(
+                            {"error": "invalid_json_arguments"},
+                            ensure_ascii=False,
+                        ),
+                    })
+                    continue
                 yield factory.create(
                     "tool_start",
                     tool_call_id=call.id,

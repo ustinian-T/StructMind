@@ -43,6 +43,7 @@
       assistantAvatar=""
       :richContent="true"
       @send="sendMessage"
+      @stop="stopStreaming"
       @ask-example="askExample"
       @update:inputValue="userInput = $event"
     >
@@ -130,6 +131,15 @@ export default {
       this.conversationId = null
       this.streamContent = ''
       this.streaming = false
+    },
+    stopStreaming() {
+      // 当前云函数返回一次性 events 数组（非真正的 SSE/WebSocket），无法
+      // 在中途真正中断。这里只把本地状态收回，提示用户已停止；后端请求
+      // 完成后会被丢弃。
+      if (!this.streaming) return
+      this.streaming = false
+      this.streamContent = ''
+      this.messages.push({ role: 'assistant', content: '（用户已停止本次生成）' })
     },
     async sendMessage() {
       const msg = this.userInput.trim()

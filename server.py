@@ -34,6 +34,7 @@ from src.config import (
     ADMIN_PASSWORD,
 )
 from src.ai.providers import AIProviderError
+from src.ai.gateway import close_shared_http_client
 from src.db.database import PracticeDatabase
 from src.services.parser import load_question_bank, load_assignment_bank
 from src.routes import api_router
@@ -83,7 +84,8 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # 关闭（未来可在这里做清理）
+    # 关闭：释放共享 httpx 客户端，避免进程退出时连接句柄泄漏。
+    await close_shared_http_client()
 
 
 # ── FastAPI 应用 ──

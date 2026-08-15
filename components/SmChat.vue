@@ -36,28 +36,26 @@
         </view>
       </view>
 
-      <!-- 打字指示器 -->
-      <view class="sm-chat-msg assistant" v-if="streaming">
+      <!-- 思考中（首 token 到达前的占位 + 中断按钮） -->
+      <view class="sm-chat-msg assistant" v-if="streaming && !streamContent">
         <view class="sm-chat-avatar">
           <text>{{ assistantAvatar }}</text>
         </view>
-        <view class="sm-chat-bubble sm-chat-typing">
-          <view class="sm-typing-dots">
-            <view class="sm-typing-dot"></view>
-            <view class="sm-typing-dot"></view>
-            <view class="sm-typing-dot"></view>
-          </view>
+        <view class="sm-chat-bubble sm-chat-thinking">
+          <view class="sm-thinking-pulse" aria-hidden="true"></view>
+          <text class="sm-thinking-label">思考中…</text>
+          <button class="sm-thinking-stop" @click="$emit('stop')">停止</button>
         </view>
       </view>
 
-      <!-- 流式内容 -->
+      <!-- 流式内容：打字机光标（高亮底色 + 渐变尾） -->
       <view class="sm-chat-msg assistant" v-if="streaming && streamContent">
         <view class="sm-chat-avatar">
           <text>{{ assistantAvatar }}</text>
         </view>
         <view class="sm-chat-bubble">
           <text>{{ streamContent }}</text>
-          <text class="sm-stream-cursor">|</text>
+          <text class="sm-stream-caret" aria-hidden="true">▍</text>
         </view>
       </view>
     </scroll-view>
@@ -75,11 +73,19 @@
         @confirm="$emit('send')"
       />
       <button
+        v-if="!streaming"
         class="sm-chat-send"
-        :disabled="streaming || !inputValue"
+        :disabled="!inputValue"
         @click="$emit('send')"
       >
         <text>发送</text>
+      </button>
+      <button
+        v-else
+        class="sm-chat-stop"
+        @click="$emit('stop')"
+      >
+        <text>停止</text>
       </button>
     </view>
   </view>
@@ -103,7 +109,7 @@ export default {
     assistantAvatar: { type: String, default: '🦉' },
     scrollTop: { type: Number, default: 0 },
   },
-  emits: ['ask-example', 'send', 'update:inputValue', 'update:scrollTop'],
+  emits: ['ask-example', 'send', 'stop', 'update:inputValue', 'update:scrollTop'],
   data() {
     return { fadeInAnimation: '' }
   },
@@ -162,22 +168,56 @@ export default {
   border-bottom-left-radius: 4px;
 }
 
-/* 打字指示器 */
-.sm-chat-typing { padding: 14px 18px; }
-.sm-typing-dots { display: flex; gap: 4px; }
-.sm-typing-dot {
-  width: 8px; height: 8px; border-radius: 50%; background: #a0b0ac;
-  animation: sm-dot-bounce 1.4s ease-in-out infinite;
+/* 思考中（首 token 到达前 + 中断按钮） */
+.sm-chat-thinking {
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 180px;
 }
-.sm-typing-dot:nth-child(2) { animation-delay: 0.2s; }
-.sm-typing-dot:nth-child(3) { animation-delay: 0.4s; }
-@keyframes sm-dot-bounce {
-  0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
-  40% { transform: scale(1); opacity: 1; }
+.sm-thinking-pulse {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: linear-gradient(135deg, #477a50, #6caa72);
+  animation: sm-pulse 1.2s ease-in-out infinite;
+  flex-shrink: 0;
 }
+@keyframes sm-pulse {
+  0%, 100% { transform: scale(.7); opacity: .55; }
+  50% { transform: scale(1.15); opacity: 1; }
+}
+.sm-thinking-label {
+  font-size: 13px;
+  color: #6b8280;
+  letter-spacing: .02em;
+  flex: 1;
+}
+.sm-thinking-stop {
+  background: transparent;
+  border: 1px solid #d8e4d3;
+  color: #b84b42;
+  border-radius: 999px;
+  padding: 3px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.sm-thinking-stop:active { background: #fff0ee; }
 
-.sm-stream-cursor { animation: sm-blink 1s infinite; color: #477a50; }
-@keyframes sm-blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+/* 流式光标（打字机）—— 高亮底色 + 渐变尾 */
+.sm-stream-caret {
+  display: inline-block;
+  margin-left: 2px;
+  font-size: 18px;
+  line-height: 1;
+  color: #477a50;
+  background: linear-gradient(180deg, transparent 0%, transparent 40%, rgba(71, 122, 80, .18) 40%, rgba(71, 122, 80, .18) 80%, transparent 80%);
+  animation: sm-caret-blink 1s steps(2, jump-none) infinite;
+}
+@keyframes sm-caret-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: .15; }
+}
 
 /* 输入区 */
 .sm-chat-input-area {
@@ -188,11 +228,12 @@ export default {
   flex: 1; height: 44px; background: #fff; border: 1px solid #d8e4d3;
   border-radius: 22px; padding: 0 18px; font-size: 15px;
 }
-.sm-chat-send {
+.sm-chat-send, .sm-chat-stop {
   width: 64px; height: 44px; border-radius: 22px; border: none;
   background: #477a50; color: #fff;
   font-weight: 600; display: flex; align-items: center; justify-content: center;
   cursor: pointer;
 }
 .sm-chat-send[disabled] { opacity: 0.5; }
+.sm-chat-stop { background: #b84b42; }
 </style>

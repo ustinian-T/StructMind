@@ -15,6 +15,32 @@ from src.ai.providers import ai_api_key, normalize_model, provider_for_model
 from src.config import AI_PROVIDERS, AI_TIMEOUT_SECONDS
 
 
+# ── 共享 httpx 客户端（避免每次请求新建 AsyncClient 句柄泄漏） ──
+
+
+_HTTPX_CLIENT: httpx.AsyncClient | None = None
+
+
+def get_shared_http_client() -> httpx.AsyncClient:
+    """进程级单例 httpx 客户端，lifespan 关闭时统一释放。"""
+    global _HTTPX_CLIENT
+    if _HTTPX_CLIENT is None:
+        kwargs: dict[str, Any] = {"timeout": AI_TIMEOUT_SECONDS}
+        proxy = _get_proxy()
+        if proxy:
+            kwargs["proxy"] = proxy
+        _HTTPX_CLIENT = httpx.AsyncClient(**kwargs)
+    return _HTTPX_CLIENT
+
+
+async def close_shared_http_client() -> None:
+    """lifespan 关闭时由 server.py 调用，统一释放底层连接。"""
+    global _HTTPX_CLIENT
+    if _HTTPX_CLIENT is not None:
+        await _HTTPX_CLIENT.aclose()
+        _HTTPX_CLIENT = None
+
+
 class NativeToolCall(BaseModel):
     id: str
     name: str
@@ -47,22 +73,21 @@ class AsyncModelGateway:
                 raise RuntimeError("Agent 请求模型与用户凭据不匹配。")
             if credential.protocol == "anthropic":
                 self._client = None
+                self._owned_http_client = False
                 return
-            kwargs: dict[str, Any] = {"timeout": AI_TIMEOUT_SECONDS}
-            proxy = _get_proxy()
-            if proxy:
-                kwargs["http_client"] = httpx.AsyncClient(proxy=proxy)
             self._client = AsyncOpenAI(
                 api_key=credential.api_key,
                 base_url=credential.base_url,
-                **kwargs,
+                http_client=get_shared_http_client(),
             )
+            self._owned_http_client = False
             return
 
         self.model = normalize_model(model)
         self.provider = provider_for_model(self.model)
         if client is not None:
             self._client = client
+            self._owned_http_client = False
             return
 
         api_key = ai_api_key(self.provider)
@@ -70,11 +95,18 @@ class AsyncModelGateway:
             label = AI_PROVIDERS[self.provider]["label"]
             raise RuntimeError(f"未设置 {label} API Key，AI 功能暂不可用。")
         base_url = AI_PROVIDERS[self.provider]["url"].replace("/chat/completions", "/v1")
-        kwargs: dict[str, Any] = {"timeout": AI_TIMEOUT_SECONDS}
-        proxy = _get_proxy()
-        if proxy:
-            kwargs["http_client"] = httpx.AsyncClient(proxy=proxy)
-        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url, **kwargs)
+        self._client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            http_client=get_shared_http_client(),
+        )
+        self._owned_http_client = False
+
+    async def aclose(self) -> None:
+        """显式释放 gateway 持有的资源。httpx client 是全局共享的，这里不重复关闭。"""
+        # AsyncOpenAI 本身没有 aclose；http_client 是模块级单例。
+        # 仍然提供这个方法是为了让调用方在 lifespan/finally 中表达意图。
+        self._client = None  # type: ignore[assignment]
 
     async def stream(
         self,
